@@ -1,5 +1,7 @@
 # using ANTLR with "SourceAcademy Conductor"
 
+# Reduced Implementation of Rust in Typescript
+
 ## starting point:
 Refer to Sam's repository: https://github.com/tsammeow/conductor-runner-example
 I have forked it and made some configuartion changes to make it work with ANTLR.
