@@ -34,28 +34,20 @@ console.log(result)
 import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
+import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 
 
 const chunk = `
-struct Person {
-    name: String,
-    age: u32,
-}
-
-impl Person {
-    fn new(name: String, age: u32) -> Person {
-        Person { name, age }
+fn test(x:i32,y:i32) ->i32 {
+    let mut z = 1;
+    const TEST:i32 = 2;
+    fn test2(x:i32,y:i32) ->i32 {
+        3;
     }
-
-    fn greet(&self) {
-        println!("Hello, my name is {} and I am {} years old.", self.name, self.age);
-    }
+    3 + 5;
 }
 
-fn main() {
-    let person = Person::new(String::from("Alice"), 30);
-    person.greet();
-}
+
 `
 const inputStream = CharStream.fromString(chunk);
 const lexer = new RustLexer(inputStream);
@@ -65,3 +57,8 @@ const parser = new RustParser(tokenStream);
 // Parse the input
 const tree = parser.crate();
 console.log(tree.toStringTree(parser));
+
+const visitor = new RustEvaluatorVisitor();
+const result = visitor.visit(tree);
+
+console.log(`The result of evaluating code is: ${result}`);

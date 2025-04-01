@@ -1,7 +1,7 @@
 import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from 'antlr4ng';
-import { RustEvaluatorVisitor} from "./RustEvaluator"
+import { RustEvaluatorVisitor} from "./RustEvaluatorVisitor"
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 
