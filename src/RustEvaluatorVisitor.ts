@@ -1,5 +1,5 @@
 import { AbstractParseTreeVisitor } from 'antlr4ng';
-import { CrateContext } from "./parser/src/RustParser.js";
+import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
 import { DelimTokenTreeContext } from "./parser/src/RustParser.js";
 import { TokenTreeContext } from "./parser/src/RustParser.js";
@@ -252,49 +252,58 @@ const FUNCTIONS_LOGGING = {
     "RETURN_EXPRESSION": true,
     "CALL_EXPRESSION": true,
     "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
+    "COMPARISON_EXPRESSION": true
 
 }
 
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
-        console.log(`[${enclosing_function}] --- ${message}`);
-    } else if (FUNCTIONS_LOGGING[enclosing_function]) {
-        console.log(`[${enclosing_function}] --- ${message}`);
+        if (FUNCTIONS_LOGGING[enclosing_function]) {
+            console.log(`[${enclosing_function}] --- ${message}`);
+        }
     }
 }
 
-export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> implements RustParserVisitor<String> {
+export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
     // entry node
-    visitCrate (ctx: CrateContext): String {
-        // scan out local declarations - TODO: there cant be nested sequences right?
+    visitCrate (ctx: CrateContext): object[] {
+        // scan out local declarations in the global frame
+        // in our Rust sublanguage, global frames only allow function declarations and constant declarations.
         let locals = [];
-        for (let i = 0; i < ctx.item().length; i++) {
-            const item = ctx.item(i)
-            log(`SCANNING OUTER MOST BLOCK ${i}: ${item.getText()}`, "CRATE");
-            if (item.visItem() != null) {
-                if (item.visItem().function_() != null) {
-                    let symbol = this.visit(item.visItem().function_().identifier())
+        ctx.item().forEach(item => {
+            log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
+            
+            if (item.visItem()) {
+                const visItem = item.visItem();
+                
+                if (visItem.function_()) {
+                    const symbol = this.visit(visItem.function_().identifier());
                     log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
                     locals.push(symbol);
-                } else if (item.visItem().constantItem() != null) {
-                    let symbol = this.visit(item.visItem().constantItem().identifier())
+                }
+                else if (visItem.constantItem()) {
+                    const symbol = this.visit(visItem.constantItem().identifier());
                     log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
                     locals.push(symbol);
+                } else {
+                    // throw error
                 }
             }
-        }
+        });
+
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }
         ce = compile_time_environment_extend(locals, ce)
         log(`ENVIRONMENT: ${ce}`, "CRATE")
         this.visitChildren(ctx);
         instrs[wc++] = { tag: "EXIT_SCOPE" }
         instrs[wc] = { tag: "DONE" }
-        return this.defaultResult()
+
+        return instrs; // return the instructions list directly
     }
 
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): String {
-        instrs[wc++] = { tag: "LDC", val: ctx.getText() }
+        instrs[wc++] = { tag: "LDC", val: ctx.getText() } // TODO: cast the val to the actual type in typescript instead of string
         log(`LOAD CONSTANT: ${ctx.getText()}`, "LITERAL_EXPRESSION")
         return ctx.getText();
     }
@@ -338,7 +347,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     // constantItem
     // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
     // ;
-    visitConstantItem(ctx: ConstantItemContext): String {
+    visitConstantItem(ctx: ConstantItemContext): undefined {
         let symbol = this.visit(ctx.identifier())
         let expr = this.visit(ctx.expression())
         log(`SYMBOL: ${symbol}`, "CONSTANT_ITEM")
@@ -348,12 +357,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
-        return "";
     }
 
 
     // expression EQ expression
-    visitAssignmentExpression(ctx: AssignmentExpressionContext): String {
+    visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
         let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
         log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
         let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
@@ -364,8 +372,6 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
-
-        return ""
     }
 
     // identifierPattern
@@ -388,15 +394,17 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     // blockExpression
     // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
     // ;
-    visitBlockExpression (ctx: BlockExpressionContext): String {
+    visitBlockExpression (ctx: BlockExpressionContext): undefined {
         if (ctx.statements() == null) {
-            return "";
+            return;
         }
         
         // scan out local declarations - TODO: there cant be nested sequences right?
         let locals = [];
         log(`<<< SCANNING OUT LOCAL DECLARATIONS >>>`, "BLOCK_EXPRESSION");
-        for (let i = 0; i < ctx.statements().statement().length; i++) {
+
+        const statements = ctx.statements().statement();
+        for (let i = 0; i < statements.length; i++) {
             const stmt = ctx.statements().statement(i).getChild(0); // each statement can only have 1 child
             // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
             if (stmt instanceof LetStatementContext) {
@@ -423,7 +431,6 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
         ce = compile_time_environment_extend(locals, ce)
 		this.visitChildren(ctx);
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
-        return "";
     }
 
     // function_
@@ -432,7 +439,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     //     | SEMI
     // )
     // ;
-    visitFunction_ (ctx: Function_Context): String {
+    visitFunction_ (ctx: Function_Context): undefined {
         let symbol = this.visit(ctx.identifier())
         let params = ctx.functionParameters()
         let body = ctx.blockExpression()
@@ -442,10 +449,9 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
-        return ""
     }
 
-    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): String {
+    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
         log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
         let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
         instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
@@ -462,11 +468,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
         instrs[wc++] = { tag: "RESET" }
         goto_instruction.addr = wc
         log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
-        return ""
     }
 
     // KW_RETURN expression?
-    visitReturnExpression(ctx: ReturnExpressionContext): String {
+    visitReturnExpression(ctx: ReturnExpressionContext): undefined {
         log(`<<< VISITING CHILDREN OF RETURN EXPR >>>`, "RETURN_EXPRESSION")
         this.visitChildren(ctx)
         log(`<<< VISIT CHILDREN OF RETURN EXPR COMPLETE >>>`, "RETURN_EXPRESSION")
@@ -476,9 +481,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
             instrs[wc - 1].tag = "TAIL_CALL"
         } else {
             instrs[wc++] = { tag: "RESET"}
-        }
-        
-        return ""
+        }        
     }
 
     // expression LPAREN callParams? RPAREN
@@ -494,7 +497,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
         return symbol
     }
 
-    visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): String {
+    visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): undefined {
         this.visit(ctx.expression(0))
         this.visit(ctx.expression(1))
         let symbol = ctx.AND() != null
@@ -513,15 +516,82 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
                         ? "*"
                         : ctx.CARET() != null
                         ? "^"
-                        : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`)
+                        : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
 
         instrs[wc++] = { tag: "BINOP", sym: symbol }
 
         log(`OP1: ${ctx.expression(0).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         log(`OP2: ${ctx.expression(1).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         log(`SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
-        return ""
     }
+
+    // expression comparisonOperator expression 
+    visitComparisonExpression(ctx: ComparisonExpressionContext): undefined {
+        const op1: String = this.visit(ctx.expression(0));
+        const op2: String = this.visit(ctx.expression(1));
+
+        const op: ComparisonOperatorContext = ctx.comparisonOperator(); 
+        const symbol = op.EQEQ() 
+                        ? "==="
+                        : op.GE()
+                        ? '>='
+                        : op.GT
+                        ? ">"
+                        : op.LE
+                        ? "<="
+                        : op.LT
+                        ? "<"
+                        : op.NE()
+                        ? "!=="
+                        : error('Unknown comparison operator')
+
+        instrs[wc++] = { tag: "BINOP", sym: symbol }
+
+        log(`OP1: ${op1}`, "COMPARISON_EXPRESSION")
+        log(`OP2: ${op2}`, "COMPARISON_EXPRESSION")
+        log(`SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION")
+    }
+
+    // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
+    visitIfExpression(ctx: IfExpressionContext): undefined {
+        // predicate
+        const predicate: ExpressionContext = ctx.expression(); 
+        this.visit(predicate); 
+
+        const jump_on_false_instruction = { tag: "JOF", addr: -1 };
+		instrs[wc++] = jump_on_false_instruction;
+
+        // then block
+        const cons: BlockExpressionContext = ctx.blockExpression(0); // then block, always exists
+        this.visit(cons);
+
+        // alternative branch
+        if (ctx.KW_ELSE()) {
+            // only add goto_instruction if else branch exists
+            const goto_instruction = { tag: "GOTO" , addr: -1};
+            instrs[wc++] = goto_instruction;
+            jump_on_false_instruction.addr = wc;
+
+            // this is an else block: else {}
+            if (ctx.blockExpression().length > 1) {
+                const alt: BlockExpressionContext = ctx.blockExpression(1);
+                this.visit(alt)
+            }
+            // this is an else if block: else if (expression) {} 
+            else if (ctx.ifExpression()) {
+                this.visit(ctx.ifExpression());
+            } else {
+                // this is an if let expression: not within scope
+                error("Error: Undefined expression")
+            }
+
+            goto_instruction.addr = wc;
+        } else {
+            jump_on_false_instruction.addr = wc;
+        }
+
+    }
+
 
     // Override the default result method from AbstractParseTreeVisitor
     protected defaultResult(): String {

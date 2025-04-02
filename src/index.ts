@@ -39,14 +39,31 @@ import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 
 const chunk = `
 fn main() {
-    const TEST_CONST: i32 = 1;
-    let mut test_mut_let: i32 = 2;
-    fn test_closure(p1: i32, p2: i32) {
-        const FILLER: i32 = 11;
-        return 3;
+    // const TEST_CONST: i32 = 1;
+    // let mut test_mut_let: i32 = 2;
+    // fn test_closure(p1: i32, p2: i32) {
+    //     const FILLER: i32 = 11;
+    //     return 3;
+    // }
+    // test_mut_let = test_mut_let + 6;
+    // test_closure(4, 5);
+
+    if (true) {
+        1;
+    } 
+
+    fn validate(x: i32) -> bool {
+        return x >= 2;
     }
-    test_mut_let = test_mut_let + 6;
-    test_closure(4, 5);
+
+    const x : i32 = 5;
+    if (x < 2) {
+        return x;
+    } else if (validate(x)) {
+        return x;
+    } else {
+        return x;
+    }
 }
 `
 const inputStream = CharStream.fromString(chunk);
@@ -59,9 +76,9 @@ const tree = parser.crate();
 console.log(tree.toStringTree(parser));
 
 const visitor = new RustEvaluatorVisitor();
-const result = visitor.visit(tree);
+const instrs : object[] = visitor.visit(tree);
 
-console.log(`The result of evaluating code is: ${result}`);
+console.log(`The result of evaluating code is: ${instrs.map(obj => JSON.stringify(obj)).join("\n ")}`);
 
 /*
 function main() {

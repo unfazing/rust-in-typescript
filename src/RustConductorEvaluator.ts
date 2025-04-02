@@ -25,7 +25,7 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const parser = new RustParser(tokenStream);
             
             // Parse the input
-            const tree = parser.prog();
+            const tree = parser.crate();
             
             // Evaluate the parsed tree
             const result = this.visitor.visit(tree);
