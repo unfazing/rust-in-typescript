@@ -227,7 +227,6 @@ import { MacroLiteralTokenContext } from "./parser/src/RustParser.js";
 import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
-import { ExpressionContext, ProgContext } from './parser/src/SimpleLangParser';
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
 import { compile_time_environment_extend, compile_time_environment_position, global_compile_environment } from './RustCompileTimeEnv.js';
 // wc: write counter
@@ -236,16 +235,75 @@ let wc = 0;
 let instrs = [];
 let ce = global_compile_environment;
 
+const LOGGING_ENABLED = true; // Set to false to disable logging
+
+const FUNCTIONS_LOGGING = {
+    "CRATE": true,
+    "LITERAL_EXPRESSION": true,
+    "PATH_EXPRESSION": true,
+    "LET_STATEMENT": true,
+    "CONSTANT_ITEM": true,
+    "ASSIGNMENT_EXPRESSION": true,
+    "IDENTIFIER_PATTERN": true,
+    "BLOCK_EXPRESSION": true,
+    "FUNCTION": true,
+    "FUNCTION->CLOSURE": true,
+    "RETURN_EXPRESSION": true,
+    "CALL_EXPRESSION": true,
+    "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
+
+}
+
+function log(message: any, enclosing_function: string): void {
+    if (LOGGING_ENABLED) {
+        console.log(`[${enclosing_function}] --- ${message}`);
+    } else if (FUNCTIONS_LOGGING[enclosing_function]) {
+        console.log(`[${enclosing_function}] --- ${message}`);
+    }
+}
+
 export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> implements RustParserVisitor<String> {
-    // visitCrate (ctx: CrateContext): Result {
-    //     return this.visit(ctx.expression());
-    // }
+    // entry node
+    visitCrate (ctx: CrateContext): String {
+        // scan out local declarations - TODO: there cant be nested sequences right?
+        let locals = [];
+        for (let i = 0; i < ctx.item().length; i++) {
+            const item = ctx.item(i)
+            log(`SCANNING OUTER MOST BLOCK ${i}: ${item.getText()}`, "CRATE");
+            if (item.visItem() != null) {
+                if (item.visItem().function_() != null) {
+                    let symbol = this.visit(item.visItem().function_().identifier())
+                    log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
+                    locals.push(symbol);
+                } else if (item.visItem().constantItem() != null) {
+                    let symbol = this.visit(item.visItem().constantItem().identifier())
+                    log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
+                    locals.push(symbol);
+                }
+            }
+        }
+        ce = compile_time_environment_extend(locals, ce)
+        log(`ENVIRONMENT: ${ce}`, "CRATE")
+        return this.visitChildren(ctx);
+    }
 
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): String {
         instrs[wc++] = { tag: "LDC", val: ctx.getText() }
-        console.log(`LITERAL: ${ctx.getText()}`)
+        log(`LOAD CONSTANT: ${ctx.getText()}`, "LITERAL_EXPRESSION")
         return ctx.getText();
+    }
+
+    // leaf node
+    visitPathExpression(ctx: PathExpressionContext): String {
+        let symbol = this.visitChildren(ctx)
+        instrs[wc++] = {
+            tag: "LD",
+            sym: symbol,
+            pos: compile_time_environment_position(ce, symbol)
+        }
+        log(`LOAD VARIABLE: ${symbol}`, "PATH_EXPRESSION")
+        return symbol
     }
 
     // TODO: MUST ASSIGN VALUE TO VARIABLE?
@@ -255,18 +313,18 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     visitLetStatement (ctx: LetStatementContext): String {
         let symbol = this.visit(ctx.patternNoTopAlt())
         let expr = this.visit(ctx.expression())
-        console.log(`LET symbol: ${symbol}`)
-        console.log(`LET expr: ${expr}`)
+        log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
+        log(`EXPR: ${expr}`, "LET_STATEMENT")
         
         if (symbol.startsWith("mut ")) {
             instrs[wc++] = {
                 tag: "MUT_ASSIGN", // mutable assign
-                // pos: compile_time_environment_position(ce, symbol.substring(4)),
+                pos: compile_time_environment_position(ce, symbol.substring(4)),
             };
         } else {
             instrs[wc++] = {
                 tag: "ASSIGN", // immutable assign
-                // pos: compile_time_environment_position(ce, symbol),
+                pos: compile_time_environment_position(ce, symbol),
             };
         }
         return symbol;
@@ -278,14 +336,30 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     visitConstantItem(ctx: ConstantItemContext): String {
         let symbol = this.visit(ctx.identifier())
         let expr = this.visit(ctx.expression())
-        console.log(`CONST symbol: ${symbol}`)
-        console.log(`CONST expr: ${expr}`)
+        log(`SYMBOL: ${symbol}`, "CONSTANT_ITEM")
+        log(`EXPR: ${expr}`, "CONSTANT_ITEM")
         
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
-            // pos: compile_time_environment_position(ce, symbol),
+            pos: compile_time_environment_position(ce, symbol),
         };
         return "";
+    }
+
+
+    // expression EQ expression
+    visitAssignmentExpression(ctx: AssignmentExpressionContext): String {
+        let symbol = this.visitChildren(ctx.expression(0)) // visit children of pathExpression to avoid adding LD instr
+        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
+        log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
+        log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
+        
+        instrs[wc++] = {
+            tag: "ASSIGN", // immutable assign
+            pos: compile_time_environment_position(ce, symbol),
+        };
+
+        return ""
     }
 
     // identifierPattern
@@ -294,6 +368,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     visitIdentifierPattern(ctx: IdentifierPatternContext): String {
         if (ctx.KW_MUT() != null) {
             // pass mutability information up to LetStatement
+            log(`FOUND MUT ${ctx.identifier().getText()}`, "IDENTIFIER_PATTERN")
             return "mut " + ctx.identifier().getText(); // append "mut" + whitespace to identifier
         } else {
             return ctx.identifier().getText();
@@ -314,51 +389,116 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
         
         // scan out local declarations - TODO: there cant be nested sequences right?
         let locals = [];
+        log(`<<< SCANNING OUT LOCAL DECLARATIONS >>>`, "BLOCK_EXPRESSION");
         for (let i = 0; i < ctx.statements().statement().length; i++) {
             const stmt = ctx.statements().statement(i).getChild(0); // each statement can only have 1 child
-            console.log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`);
+            // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
             if (stmt instanceof LetStatementContext) {
                 let symbol = this.visit(stmt.patternNoTopAlt())
                 symbol = symbol.startsWith("mut ") ? symbol.substring(4) : symbol;
-                console.log(`LET LOCAL SYMBOL: ${symbol}`);
+                log(`FOUND LET LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
                 locals.push(symbol);
             } else if (stmt instanceof ItemContext) {
                 if (stmt.visItem() != null) {
                     if (stmt.visItem().function_() != null) {
                         let symbol = this.visit(stmt.visItem().function_().identifier())
-                        console.log(`FUNCTION LOCAL SYMBOL: ${symbol}`);
+                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
                         locals.push(symbol);
                     } else if (stmt.visItem().constantItem() != null) {
                         let symbol = this.visit(stmt.visItem().constantItem().identifier())
-                        console.log(`CONST LOCAL SYMBOL: ${symbol}`);
+                        log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
                         locals.push(symbol);
                     }
                 }
             }
         }
+        log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length };
-        compile_time_environment_extend(locals, ce)
+        ce = compile_time_environment_extend(locals, ce)
 		this.visitChildren(ctx);
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
         return "";
     }
 
+    // function_
+    // : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
+    //     blockExpression
+    //     | SEMI
+    // )
+    // ;
     visitFunction_ (ctx: Function_Context): String {
         let symbol = this.visit(ctx.identifier())
+        let params = ctx.functionParameters()
+        let body = ctx.blockExpression()
+        log(`SYMBOL: ${symbol}`, "FUNCTION")
+        instrs[wc++] = {
+            tag: "ASSIGN", // immutable assign
+            pos: compile_time_environment_position(ce, symbol),
+        };
+        this.insertClosure(params, body)
         return ""
+    }
+
+    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): String {
+        log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
+        let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
+        instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
+        const goto_instruction = { tag: "GOTO", addr: -1 }
+        instrs[wc++] = goto_instruction
+        let param_list =  []
+        for (let i = 0; i < arity; i++) {
+            param_list.push(this.visit(params_ctx.functionParam(i)))
+        }
+        log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
+        ce = compile_time_environment_extend(param_list, ce)
+        this.visit(body_ctx)
+        instrs[wc++] = { tag: "LDC", val: undefined}
+        instrs[wc++] = { tag: "RESET" }
+        goto_instruction.addr = wc
+        log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
+        return ""
+    }
+
+    // KW_RETURN expression?
+    visitReturnExpression(ctx: ReturnExpressionContext): String {
+        log(`<<< VISITING CHILDREN OF RETURN EXPR >>>`, "RETURN_EXPRESSION")
+        this.visitChildren(ctx)
+        log(`<<< VISIT CHILDREN OF RETURN EXPR COMPLETE >>>`, "RETURN_EXPRESSION")
+        if (ctx.expression() instanceof CallExpressionContext) {
+            // turn call into tail call
+            log(`FOUND TAIL CALL`, "RETURN_EXPRESSION")
+            instrs[wc - 1].tag = "TAIL_CALL"
+        } else {
+            instrs[wc++] = { tag: "RESET"}
+        }
+        
+        return ""
+    }
+
+    // expression LPAREN callParams? RPAREN
+    visitCallExpression(ctx: CallExpressionContext): String {
+        let symbol = this.visit(ctx.expression())
+        let arity = ctx.callParams() == null || ctx.callParams().expression() == null ? 0 : ctx.callParams().expression().length
+        log(`SYMBOL: ${symbol}`, "CALL_EXPRESSION")
+        log(`ARITY: ${arity}`, "CALL_EXPRESSION")
+        for (let i = 0; i < arity; i++) {
+            this.visit(ctx.callParams().expression(i))
+        }
+        instrs[wc++] = { tag: "CALL", arity: arity}
+        return symbol
     }
 
     visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): String {
         if (ctx.PLUS) {
-            console.log(ctx.expression(0).getText())
-            console.log(ctx.expression(1).getText())
+            log(ctx.expression(0).getText(), "ARITHMETIC_OR_LOGICAL_EXPRESSION")
+            log(ctx.expression(1).getText(), "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         }
         return ""
     }
 
     // Override the default result method from AbstractParseTreeVisitor
     protected defaultResult(): String {
-        return "";
+        return instrs.map(obj => JSON.stringify(obj)).join("; ");;
     }
     
     // Override the aggregate result method

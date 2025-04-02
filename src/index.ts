@@ -38,13 +38,14 @@ import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 
 
 const chunk = `
-fn test(x:i32,y:i32) ->i32 {
-    let mut z = 1;
-    const TEST:i32 = 2;
-    fn test2(x:i32,y:i32) ->i32 {
-        3;
+fn main() {
+    const TEST_CONST: i32 = 1;
+    let mut test_mut_let: i32 = 2;
+    fn test_closure(p1: i32, p2: i32) {
+        return p2 + p1;
     }
-    3 + 5;
+    test_mut_let = test_mut_let + 6;
+    test_closure();
 }
 
 

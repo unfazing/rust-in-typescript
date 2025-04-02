@@ -95,7 +95,7 @@ const builtin_array = [];
 // }
 
 const constants = {
-	// undefined: Undefined,
+	None: null,
 	// math_E: math_E,
 	// math_LN10: math_LN10,
 	// math_LN2: math_LN2,
