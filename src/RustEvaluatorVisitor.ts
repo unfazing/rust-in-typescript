@@ -552,6 +552,18 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION")
     }
 
+    // (MINUS | NOT) expression
+    visitNegationExpression(ctx: NegationExpressionContext): undefined {
+        this.visit(ctx.expression());
+        const sym = ctx.MINUS() 
+            ? "!"
+            : ctx.NOT()
+            ? "-unary"
+            : error("Unknown unary operator")
+                        
+        instrs[wc++] = { tag: "UNOP", sym: sym }
+    }
+
     // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
     visitIfExpression(ctx: IfExpressionContext): undefined {
         // predicate
