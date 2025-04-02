@@ -589,9 +589,27 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         } else {
             jump_on_false_instruction.addr = wc;
         }
-
     }
 
+    // KW_WHILE expression /*except structExpression*/ blockExpression
+    visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): undefined {
+		const loop_start: number = wc;
+
+        const predicate: ExpressionContext = ctx.expression();
+        this.visit(predicate);
+
+        const jump_on_false_instruction = { tag: "JOF", addr: -1 };
+		instrs[wc++] = jump_on_false_instruction;        
+        
+        const body: BlockExpressionContext = ctx.blockExpression();
+        this.visit(body)
+
+        instrs[wc++] = { tag: "POP" };
+		instrs[wc++] = { tag: "GOTO", addr: loop_start };
+        jump_on_false_instruction.addr = wc;
+
+		instrs[wc++] = { tag: "LDC", val: undefined }; // while loops always have the unit type () in Rust!!
+    }
 
     // Override the default result method from AbstractParseTreeVisitor
     protected defaultResult(): String {

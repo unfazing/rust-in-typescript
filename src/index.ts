@@ -39,33 +39,48 @@ import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 
 const chunk = `
 fn main() {
-    // const TEST_CONST: i32 = 1;
-    // let mut test_mut_let: i32 = 2;
-    // fn test_closure(p1: i32, p2: i32) {
-    //     const FILLER: i32 = 11;
-    //     return 3;
-    // }
-    // test_mut_let = test_mut_let + 6;
-    // test_closure(4, 5);
+    const TEST_CONST: i32 = 1;
+    let mut test_mut_let: i32 = 2;
+    fn test_closure(p1: i32, p2: i32) {
+        const FILLER: i32 = 11;
+        return 3;
+    }
+    test_mut_let = test_mut_let + 6;
+    test_closure(4, 5);
+}
+`
+
+const conditionals_test = `
+fn main() {
 
     if (true) {
         1;
-    } 
+    } // no else branch
 
     fn validate(x: i32) -> bool {
         return x >= 2;
     }
 
     const x : i32 = 5;
-    if (x < 2) {
+    if (x < 2) { // comparisionExpression
         return x;
-    } else if (validate(x)) {
+    } else if (validate(x)) { // functionCall + another if expression after else
         return x;
     } else {
         return x;
     }
 }
 `
+
+const while_test = `
+fn main() {
+    let mut x : i32 = 0;
+    while x < 5 {
+        x = x + 1;
+    }
+}
+`
+
 const inputStream = CharStream.fromString(chunk);
 const lexer = new RustLexer(inputStream);
 const tokenStream = new CommonTokenStream(lexer);
