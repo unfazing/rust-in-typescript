@@ -229,6 +229,7 @@ import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
 import { compile_time_environment_extend, compile_time_environment_position, global_compile_environment } from './RustCompileTimeEnv.js';
+import { error } from 'console';
 // wc: write counter
 let wc = 0;
 // instrs: instruction array
@@ -282,9 +283,13 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
                 }
             }
         }
+        instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }
         ce = compile_time_environment_extend(locals, ce)
         log(`ENVIRONMENT: ${ce}`, "CRATE")
-        return this.visitChildren(ctx);
+        this.visitChildren(ctx);
+        instrs[wc++] = { tag: "EXIT_SCOPE" }
+        instrs[wc] = { tag: "DONE" }
+        return this.defaultResult()
     }
 
     // leaf node
@@ -349,9 +354,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
 
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): String {
-        let symbol = this.visitChildren(ctx.expression(0)) // visit children of pathExpression to avoid adding LD instr
-        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
+        let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
         log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
+        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
+        
         log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
         
         instrs[wc++] = {
@@ -431,11 +437,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
         let params = ctx.functionParameters()
         let body = ctx.blockExpression()
         log(`SYMBOL: ${symbol}`, "FUNCTION")
+        this.insertClosure(params, body)
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
-        this.insertClosure(params, body)
         return ""
     }
 
@@ -489,16 +495,37 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<String> imple
     }
 
     visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): String {
-        if (ctx.PLUS) {
-            log(ctx.expression(0).getText(), "ARITHMETIC_OR_LOGICAL_EXPRESSION")
-            log(ctx.expression(1).getText(), "ARITHMETIC_OR_LOGICAL_EXPRESSION")
-        }
+        this.visit(ctx.expression(0))
+        this.visit(ctx.expression(1))
+        let symbol = ctx.AND() != null
+                        ? "&&"
+                        : ctx.OR() != null
+                        ? "||"
+                        : ctx.MINUS() != null
+                        ? "-"
+                        : ctx.PERCENT() != null
+                        ? "%"
+                        : ctx.PLUS() != null
+                        ? "+"
+                        : ctx.SLASH() != null
+                        ? "/"
+                        : ctx.STAR() != null
+                        ? "*"
+                        : ctx.CARET() != null
+                        ? "^"
+                        : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`)
+
+        instrs[wc++] = { tag: "BINOP", sym: symbol }
+
+        log(`OP1: ${ctx.expression(0).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
+        log(`OP2: ${ctx.expression(1).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
+        log(`SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         return ""
     }
 
     // Override the default result method from AbstractParseTreeVisitor
     protected defaultResult(): String {
-        return instrs.map(obj => JSON.stringify(obj)).join("; ");;
+        return instrs.map(obj => JSON.stringify(obj)).join("\n ");
     }
     
     // Override the aggregate result method
