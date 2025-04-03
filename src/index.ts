@@ -35,6 +35,7 @@ import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
+import { RustCompiler } from './RustCompiler.js';
 
 
 const chunk = `
@@ -90,10 +91,24 @@ const parser = new RustParser(tokenStream);
 const tree = parser.crate();
 console.log(tree.toStringTree(parser));
 
-const visitor = new RustEvaluatorVisitor();
-const instrs : object[] = visitor.visit(tree);
+// Typechecker
 
-console.log(`The result of evaluating code is: ${instrs.map(obj => JSON.stringify(obj)).join("\n ")}`);
+// Compile
+const compiler = new RustCompiler();
+const instructions = compiler.compile(tree);
+
+// console.log(instructions);
+
+function printInstructions(instrs: object[]): undefined {
+    const formattedInstructions = instrs
+        .map((obj, index) => `${index}: ${JSON.stringify(obj)}`)
+        .join("\n");
+
+    console.log("Printing instructions:");
+    console.log(formattedInstructions);
+}
+
+printInstructions(instructions);
 
 /*
 function main() {

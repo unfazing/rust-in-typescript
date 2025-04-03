@@ -1,18 +1,20 @@
 import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from 'antlr4ng';
-import { RustEvaluatorVisitor} from "./RustEvaluatorVisitor"
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
+import { RustCompiler } from "./RustCompiler";
 
 export class RustConductorEvaluator extends BasicEvaluator {
     private executionCount: number;
-    private visitor: RustEvaluatorVisitor;
+    private compiler: RustCompiler;
 
     constructor(conductor: IRunnerPlugin) {
         super(conductor);
         this.executionCount = 0;
-        this.visitor = new RustEvaluatorVisitor();
+        // this.typechecker = new RustTypeChecker();
+        this.compiler = new RustCompiler();
+        // this.VM = new VirtualMachine()
     }
 
     async evaluateChunk(chunk: string): Promise<void> {
@@ -26,12 +28,16 @@ export class RustConductorEvaluator extends BasicEvaluator {
             
             // Parse the input
             const tree = parser.crate();
-            
+
             // Evaluate the parsed tree
-            const result = this.visitor.visit(tree);
+            // const result = this.visitor.visit(tree);
+
+            // typechecker.check(tree);
+            const instructions: object[] = this.compiler.compile(tree);
+            // const result = VM.run(instructions);
             
             // Send the result to the REPL
-            this.conductor.sendOutput(`Result of expression: ${result}`);
+            // this.conductor.sendOutput(`Result of expression: ${result}`);
         }  catch (error) {
             // Handle errors and send them to the REPL
             if (error instanceof Error) {
