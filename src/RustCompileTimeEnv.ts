@@ -80,8 +80,8 @@ const builtin_object = {
 	// },
 };
 
-const primitive_object = {};
-const builtin_array = [];
+export const primitive_object = {};
+export const builtin_array = [];
 // {
 // 	let i = 0;
 // 	for (const key in builtin_object) {

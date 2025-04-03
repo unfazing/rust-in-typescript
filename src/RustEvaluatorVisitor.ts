@@ -252,7 +252,9 @@ const FUNCTIONS_LOGGING = {
     "RETURN_EXPRESSION": true,
     "CALL_EXPRESSION": true,
     "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
-    "COMPARISON_EXPRESSION": true
+    "COMPARISON_EXPRESSION": true,
+    "LAZY_BOOLEAN_EXPRESSION": true,
+
 
 }
 
@@ -523,6 +525,23 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`OP1: ${ctx.expression(0).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         log(`OP2: ${ctx.expression(1).getText()}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
         log(`SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION")
+    }
+
+    // | expression ANDAND expression
+    // | expression OROR expression
+    visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): any {
+        const op1: String = this.visit(ctx.expression(0));
+        const op2: String = this.visit(ctx.expression(1));
+        const symbol = ctx.ANDAND() != null
+                        ? "&&"
+                        : ctx.OROR() != null
+                        ? "||"
+                        : error('Unknown boolean operator')
+        instrs[wc++] = { tag: "BINOP", sym: symbol }
+
+        log(`OP1: ${ctx.expression(0).getText()}`, "LAZY_BOOLEAN_EXPRESSION")
+        log(`OP2: ${ctx.expression(1).getText()}`, "LAZY_BOOLEAN_EXPRESSION")
+        log(`SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION")
     }
 
     // expression comparisonOperator expression 
