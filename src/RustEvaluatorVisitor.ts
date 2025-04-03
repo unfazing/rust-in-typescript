@@ -562,11 +562,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                         ? "==="
                         : op.GE()
                         ? '>='
-                        : op.GT
+                        : op.GT()
                         ? ">"
-                        : op.LE
+                        : op.LE()
                         ? "<="
-                        : op.LT
+                        : op.LT()
                         ? "<"
                         : op.NE()
                         ? "!=="
