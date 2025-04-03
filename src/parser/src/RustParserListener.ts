@@ -29,6 +29,7 @@ import { CrateRefContext } from "./RustParser.js";
 import { AsClauseContext } from "./RustParser.js";
 import { UseDeclarationContext } from "./RustParser.js";
 import { UseTreeContext } from "./RustParser.js";
+import { FunctionBlockExpressionContext } from "./RustParser.js";
 import { Function_Context } from "./RustParser.js";
 import { FunctionQualifiersContext } from "./RustParser.js";
 import { AbiContext } from "./RustParser.js";
@@ -142,6 +143,7 @@ import { ClosureParametersContext } from "./RustParser.js";
 import { ClosureParamContext } from "./RustParser.js";
 import { LoopExpressionContext } from "./RustParser.js";
 import { InfiniteLoopExpressionContext } from "./RustParser.js";
+import { WhileBlockExpressionContext } from "./RustParser.js";
 import { PredicateLoopExpressionContext } from "./RustParser.js";
 import { PredicatePatternLoopExpressionContext } from "./RustParser.js";
 import { IteratorLoopExpressionContext } from "./RustParser.js";
@@ -498,6 +500,16 @@ export class RustParserListener implements ParseTreeListener {
      * @param ctx the parse tree
      */
     exitUseTree?: (ctx: UseTreeContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.functionBlockExpression`.
+     * @param ctx the parse tree
+     */
+    enterFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.functionBlockExpression`.
+     * @param ctx the parse tree
+     */
+    exitFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => void;
     /**
      * Enter a parse tree produced by `RustParser.function_`.
      * @param ctx the parse tree
@@ -1690,6 +1702,16 @@ export class RustParserListener implements ParseTreeListener {
      * @param ctx the parse tree
      */
     exitInfiniteLoopExpression?: (ctx: InfiniteLoopExpressionContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.whileBlockExpression`.
+     * @param ctx the parse tree
+     */
+    enterWhileBlockExpression?: (ctx: WhileBlockExpressionContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.whileBlockExpression`.
+     * @param ctx the parse tree
+     */
+    exitWhileBlockExpression?: (ctx: WhileBlockExpressionContext) => void;
     /**
      * Enter a parse tree produced by `RustParser.predicateLoopExpression`.
      * @param ctx the parse tree

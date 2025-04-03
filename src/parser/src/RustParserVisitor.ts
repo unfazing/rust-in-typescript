@@ -29,6 +29,7 @@ import { CrateRefContext } from "./RustParser.js";
 import { AsClauseContext } from "./RustParser.js";
 import { UseDeclarationContext } from "./RustParser.js";
 import { UseTreeContext } from "./RustParser.js";
+import { FunctionBlockExpressionContext } from "./RustParser.js";
 import { Function_Context } from "./RustParser.js";
 import { FunctionQualifiersContext } from "./RustParser.js";
 import { AbiContext } from "./RustParser.js";
@@ -142,6 +143,7 @@ import { ClosureParametersContext } from "./RustParser.js";
 import { ClosureParamContext } from "./RustParser.js";
 import { LoopExpressionContext } from "./RustParser.js";
 import { InfiniteLoopExpressionContext } from "./RustParser.js";
+import { WhileBlockExpressionContext } from "./RustParser.js";
 import { PredicateLoopExpressionContext } from "./RustParser.js";
 import { PredicatePatternLoopExpressionContext } from "./RustParser.js";
 import { IteratorLoopExpressionContext } from "./RustParser.js";
@@ -397,6 +399,12 @@ export class RustParserVisitor<Result> extends AbstractParseTreeVisitor<Result> 
      * @return the visitor result
      */
     visitUseTree?: (ctx: UseTreeContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.functionBlockExpression`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => Result;
     /**
      * Visit a parse tree produced by `RustParser.function_`.
      * @param ctx the parse tree
@@ -1106,6 +1114,12 @@ export class RustParserVisitor<Result> extends AbstractParseTreeVisitor<Result> 
      * @return the visitor result
      */
     visitInfiniteLoopExpression?: (ctx: InfiniteLoopExpressionContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.whileBlockExpression`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitWhileBlockExpression?: (ctx: WhileBlockExpressionContext) => Result;
     /**
      * Visit a parse tree produced by `RustParser.predicateLoopExpression`.
      * @param ctx the parse tree

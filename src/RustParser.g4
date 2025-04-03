@@ -191,10 +191,15 @@ useTree
     | simplePath (KW_AS (identifier | UNDERSCORE))?
     ;
 
+functionBlockExpression
+    : blockExpression
+    ;
+
 // 6.4
 function_
     : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
-        blockExpression
+        // blockExpression //ORIGINAL
+        functionBlockExpression //CHANGED
         | SEMI
     )
     ;
@@ -657,8 +662,13 @@ infiniteLoopExpression
     : KW_LOOP blockExpression
     ;
 
+whileBlockExpression
+    : blockExpression
+    ;
+
 predicateLoopExpression
-    : KW_WHILE expression /*except structExpression*/ blockExpression
+    // : KW_WHILE expression /*except structExpression*/ whileBlockExpression //ORIGINAL
+    : KW_WHILE expression /*except structExpression*/ whileBlockExpression //CHANGED
     ;
 
 predicatePatternLoopExpression
