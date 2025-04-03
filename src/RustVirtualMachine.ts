@@ -131,7 +131,7 @@ const heap_get_size = (address) =>
 // except for number nodes:
 //                 they have size 2 but no children
 const heap_get_number_of_children = (address) =>
-	heap_get_tag(address) === Number_tag ? 0 : get_size(address) - 1;
+	heap_get_tag(address) === Number_tag ? 0 : heap_get_size(address) - 1;
 
 // access byte in heap, using address and offset
 const heap_set_byte_at_offset = (address, offset, value) =>
@@ -524,25 +524,64 @@ function is_string(x: any):boolean {
 
 // Supported binops: [&&, ||, &, |, -, %, +, /, *, ^, ===, >=, >, <=, <, !==]
 const binop_microcode = {
-    "&&": (x, y) => x && y,
-    "||": (x, y) => x || y,
-    "&": (x, y) => x & y,
-    "|": (x, y) => x | y,
-    "^": (x, y) => x ^ y,
-	"+": (x, y) =>
-		(is_number(x) && is_number(y)) || (is_string(x) && is_string(y))
-			? x + y
-			: error([x, y], "+ expects two numbers" + " or two strings, got:"),
-	"*": (x, y) => x * y,
-	"-": (x, y) => x - y,
-	"/": (x, y) => x / y,
-	"%": (x, y) => x % y,
-	"<": (x, y) => x < y,
-	"<=": (x, y) => x <= y,
-	">=": (x, y) => x >= y,
-	">": (x, y) => x > y,
-	"===": (x, y) => x === y,
-	"!==": (x, y) => x !== y,
+    "&&": (x, y) =>
+        is_boolean(x) && is_boolean(y)
+            ? x && y
+            : error([x, y], "&& expects two boolean values, got:"),
+    "||": (x, y) =>
+        is_boolean(x) && is_boolean(y)
+            ? x || y
+            : error([x, y], "|| expects two boolean values, got:"),
+    "&": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x & y
+            : error([x, y], "& expects two numbers, got:"),
+    "|": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x | y
+            : error([x, y], "| expects two numbers, got:"),
+    "^": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x ^ y
+            : error([x, y], "^ expects two numbers, got:"),
+    "+": (x, y) =>
+        (is_number(x) && is_number(y)) || (is_string(x) && is_string(y))
+            ? x + y
+            : error([x, y], "+ expects two numbers or two strings, got:"),
+    "*": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x * y
+            : error([x, y], "* expects two numbers, got:"),
+    "-": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x - y
+            : error([x, y], "- expects two numbers, got:"),
+    "/": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x / y
+            : error([x, y], "/ expects two numbers, got:"),
+    "%": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x % y
+            : error([x, y], "% expects two numbers, got:"),
+    "<": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x < y
+            : error([x, y], "< expects two numbers, got:"),
+    "<=": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x <= y
+            : error([x, y], "<= expects two numbers, got:"),
+    ">=": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x >= y
+            : error([x, y], ">= expects two numbers, got:"),
+    ">": (x, y) =>
+        is_number(x) && is_number(y)
+            ? x > y
+            : error([x, y], "> expects two numbers, got:"),
+    "===": (x, y) => x === y,
+    "!==": (x, y) => x !== y, 
 };
 
 // v2 is popped before v1
