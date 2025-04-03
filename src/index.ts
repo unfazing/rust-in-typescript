@@ -48,6 +48,28 @@ fn main() {
     }
     test_mut_let = test_mut_let + 6;
     test_closure(4, 5);
+
+    let mut x : i32 = 0;
+    while x < 5 {
+        x = x + 1;
+    }
+
+    if (true) {
+        1;
+    } // no else branch
+
+    fn validate(z: i32) -> bool {
+        return z >= 2;
+    }
+
+    const y : i32 = 5;
+    if (y < 2) { // comparisonExpression
+        return y;
+    } else if (validate(y)) { // functionCall + another if expression after else
+        return y;
+    } else {
+        return y;
+    }
 }
 `
 
@@ -63,7 +85,7 @@ fn main() {
     }
 
     const x : i32 = 5;
-    if (x < 2) { // comparisionExpression
+    if (x < 2) { // comparisonExpression
         return x;
     } else if (validate(x)) { // functionCall + another if expression after else
         return x;
@@ -186,44 +208,42 @@ fn main() {
     test_mut_let = test_mut_let + 6;
     test_closure(4, 5);
 }
-
-{"tag":"ENTER_SCOPE","num":1}
- {"tag":"LDF","arity":0,"addr":3}
- {"tag":"GOTO","addr":30}
- {"tag":"ENTER_SCOPE","num":3}
- {"tag":"LDC","val":"1"}
- {"tag":"ASSIGN","pos":[3,0]}
- POP
- {"tag":"LDC","val":"2"}
- {"tag":"MUT_ASSIGN","pos":[3,1]}
- POP
- {"tag":"LDF","arity":2,"addr":10}
- {"tag":"GOTO","addr":18}
- {"tag":"ENTER_SCOPE","num":1}
- {"tag":"LDC","val":"11"}
- {"tag":"ASSIGN","pos":[5,0]}
- POP
- {"tag":"LDC","val":"3"}
- {"tag":"RESET"}
- {"tag":"EXIT_SCOPE"}
- {"tag":"LDC"}
- {"tag":"RESET"}
- {"tag":"ASSIGN","pos":[3,2]}
- POP
- {"tag":"LD","sym":"test_mut_let","pos":[3,1]}
- {"tag":"LDC","val":"6"}
- {"tag":"BINOP","sym":"+"}
- {"tag":"ASSIGN","pos":[3,1]}
- POP
- {"tag":"LD","sym":"test_closure","pos":[3,2]}
- {"tag":"LDC","val":"4"}
- {"tag":"LDC","val":"5"}
- {"tag":"CALL","arity":2}
- {"tag":"EXIT_SCOPE"}
- {"tag":"LDC"}
- {"tag":"RESET"}
- {"tag":"ASSIGN","pos":[1,0]}
- {"tag":"EXIT_SCOPE"}
- {"tag":"DONE"}
-
+0: {"tag":"ENTER_SCOPE","num":1}
+1: {"tag":"LDF","arity":0,"addr":3}
+2: {"tag":"GOTO","addr":35}
+3: {"tag":"ENTER_SCOPE","num":3}
+4: {"tag":"LDC","val":"1"}
+5: {"tag":"ASSIGN","pos":[3,0]}
+6: {"tag":"POP"}
+7: {"tag":"LDC","val":"2"}
+8: {"tag":"MUT_ASSIGN","pos":[3,1]}
+9: {"tag":"POP"}
+10: {"tag":"LDF","arity":2,"addr":12}
+11: {"tag":"GOTO","addr":21}
+12: {"tag":"ENTER_SCOPE","num":1}
+13: {"tag":"LDC","val":"11"}
+14: {"tag":"ASSIGN","pos":[5,0]}
+15: {"tag":"POP"}
+16: {"tag":"LDC","val":"3"}
+17: {"tag":"RESET"}
+18: {"tag":"EXIT_SCOPE"}
+19: {"tag":"LDC"}
+20: {"tag":"RESET"}
+21: {"tag":"ASSIGN","pos":[3,2]}
+22: {"tag":"POP"}
+23: {"tag":"LD","sym":"test_mut_let","pos":[3,1]}
+24: {"tag":"LDC","val":"6"}
+25: {"tag":"BINOP","sym":"+"}
+26: {"tag":"ASSIGN","pos":[3,1]}
+27: {"tag":"POP"}
+28: {"tag":"LD","sym":"test_closure","pos":[3,2]}
+29: {"tag":"LDC","val":"4"}
+30: {"tag":"LDC","val":"5"}
+31: {"tag":"CALL","arity":2}
+32: {"tag":"EXIT_SCOPE"}
+33: {"tag":"LDC"}
+34: {"tag":"RESET"}
+35: {"tag":"ASSIGN","pos":[1,0]}
+36: {"tag":"EXIT_SCOPE"}
+37: {"tag":"DONE"}
 */

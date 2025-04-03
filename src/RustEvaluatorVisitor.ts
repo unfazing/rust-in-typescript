@@ -398,6 +398,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // ;
     visitBlockExpression (ctx: BlockExpressionContext): undefined {
         if (ctx.statements() == null) {
+            instrs[wc++] = { tag: "LDC", val: undefined }
             return;
         }
         
@@ -431,7 +432,14 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length };
         ce = compile_time_environment_extend(locals, ce)
-		this.visitChildren(ctx);
+        let first = true;
+        for (let i = 0; i < statements.length; i++) {
+            first ? (first = false): (instrs[wc++] = { tag: "POP" }
+                log("ADDING POP", "BLOCK_EXPRESSION")
+            );
+            log(`Visiting ${i} child statement ${ctx.statements().statement(i).getText()}`, "BLOCK_EXPRESSION")
+            this.visit(ctx.statements().statement(i))
+        }
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
     }
 
@@ -461,7 +469,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         instrs[wc++] = goto_instruction
         let param_list =  []
         for (let i = 0; i < arity; i++) {
-            param_list.push(this.visit(params_ctx.functionParam(i)))
+            param_list.push(this.visit(params_ctx.functionParam(i).functionParamPattern().pattern()))
         }
         log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
         ce = compile_time_environment_extend(param_list, ce)

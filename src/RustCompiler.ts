@@ -1,5 +1,5 @@
 import { ParseTree } from "antlr4ng";
-import { RustEvaluatorVisitor } from "./RustEvaluatorVisitor";
+import { RustEvaluatorVisitor } from "./RustEvaluatorVisitor.js";
 
 export class RustCompiler {
     private visitor: RustEvaluatorVisitor;
