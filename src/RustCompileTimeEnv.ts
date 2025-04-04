@@ -43,6 +43,8 @@ const value_index = (frame, x) => {
 // arguments directly from the operand stack,
 // to save the creation of an intermediate
 // argument array
+
+// TODO: add rust's dynamic String functions e.g. String::from() 
 const builtin_object = {
 	// display: () => {
 	// 	const address = OS.pop();

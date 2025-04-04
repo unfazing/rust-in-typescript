@@ -303,7 +303,24 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): String {
-        instrs[wc++] = { tag: "LDC", val: ctx.getText() } // TODO: cast the val to the actual type in typescript instead of string
+        const val = ctx.CHAR_LITERAL()
+                    ? new CharRustType(ctx.getText())
+                    : ctx.INTEGER_LITERAL()
+                    ? new I32RustType(Number(ctx.getText()))
+                    : ctx.FLOAT_LITERAL()
+                    ? new F64RustType(Number(ctx.getText()))
+                    : ctx.STRING_LITERAL()
+                    ? new StringRustType(ctx.getText())
+                    : ctx.KW_FALSE()
+                    ? new BooleanRustType(false)
+                    : ctx.KW_TRUE()
+                    ? new BooleanRustType(true)
+                    : error("Literal has format of an unknown type.")
+        
+        instrs[wc++] = { tag: "LDC", val: val } // TODO: cast the val to the actual type in typescript instead of string
+        
+        
+        
         log(`LOAD CONSTANT: ${ctx.getText()}`, "LITERAL_EXPRESSION")
         return ctx.getText();
     }

@@ -478,17 +478,18 @@ const address_to_JS_value = (x) =>
 		: "unknown word tag: " + word_to_string(x);
 
 const JS_value_to_address = (x) =>
-	is_boolean(x)
+	x instanceof BooleanRustType
 		? x
 			? True
 			: False
-		: is_number(x)
+		: x instanceof F64RustType
 		? heap_allocate_Number(x)
-		: is_undefined(x)
+		: x instanceof UnitRustType
 		? Undefined
-		: is_null(x)
-		? Null
-		: is_string(x) // ADDED CHANGE
+		// TODO: add heap allocate functions for i32 Rust Type
+		// : is_null(x)
+		// ? Null // no null value in rust
+		: x instanceof StringRustType || x instanceof CharRustType // ADDED CHANGE
 		? heap_allocate_String(x) // ADDED CHANGE
 		// : is_pair(x)
 		// ? heap_allocate_Pair(
@@ -497,25 +498,26 @@ const JS_value_to_address = (x) =>
 		//   )
 		: "unknown word tag: " + word_to_string(x);
 
-function is_boolean(x: any): boolean {
-    return typeof(x) === "boolean"
-}
+	
+// function is_boolean(x: any): boolean {
+//     return typeof(x) === "boolean"
+// }
 
-function is_undefined(x: any): boolean {
-    return typeof(x) === "undefined"
-}
+// function is_undefined(x: any): boolean {
+//     return typeof(x) === "undefined"
+// }
 
-function is_number(x: any): boolean {
-    return typeof(x) === "number"
-}
+// function is_number(x: any): boolean {
+//     return typeof(x) === "number"
+// }
 
-function is_null(x: any): boolean {
-    return x === null
-}
+// function is_null(x: any): boolean {
+//     return x === null
+// }
 
-function is_string(x: any):boolean {
-    return typeof(x) === "string"
-}
+// function is_string(x: any):boolean {
+//     return typeof(x) === "string"
+// }
 
 
 /* **********************

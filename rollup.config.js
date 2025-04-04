@@ -10,5 +10,8 @@ export default {
         dir: "dist",
         format: "iife",
         sourcemap: true,
+        globals: { // to change
+            console: "console"
+        },
     }
 }

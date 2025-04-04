@@ -29,12 +29,9 @@ export class RustConductorEvaluator extends BasicEvaluator {
             // Parse the input
             const tree = parser.crate();
 
-            // Evaluate the parsed tree
-            // const result = this.visitor.visit(tree);
-
-            // typechecker.check(tree);
+            // this.typechecker.check(tree);
             const instructions: object[] = this.compiler.compile(tree);
-            // const result = VM.run(instructions);
+            // const result = this.VM.run(instructions);
             
             // Send the result to the REPL
             // this.conductor.sendOutput(`Result of expression: ${result}`);

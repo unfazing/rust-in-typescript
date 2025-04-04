@@ -10,8 +10,7 @@
     "generate-parser": "antlr4ng -Dlanguage=TypeScript -visitor -o src/parser src/SimpleLang.g4",
     "generate-lexer-rust": "antlr4ng -Dlanguage=TypeScript -visitor src/RustLexer.g4",
     "generate-parser-rust": "antlr4ng -Dlanguage=TypeScript -visitor src/RustParser.g4",
-    "start": "tsc; node build/index.js"
-
+    "start": "node dist/index.js"
   },
   "repository": {
     "type": "git",
