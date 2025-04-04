@@ -275,7 +275,7 @@ let te: object[] = global_type_environment // an array of frame objects that map
 
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
         // entry node
-        visitCrate (ctx: CrateContext): string {
+        visitCrate (ctx: CrateContext): TypeInfo {
             let locals: string[] = []
             let typelist: TypeInfo[] = []
             ctx.item().forEach(item => {
@@ -292,7 +292,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                             Return: this.visit(visItem.function_().functionReturnType())
                         } 
 
-                        let type: TypeInfo = {Type: closure, Mutable: false };
+                        let type: TypeInfo = {TypeName: closure, Mutable: false };
 
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
                         locals.push(symbol);
@@ -306,7 +306,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         }
 
                         const type: TypeInfo = {
-                            Type: this.visit(visItem.constantItem().type_()),
+                            TypeName: this.visit(visItem.constantItem().type_()),
                             Mutable: false,
                         };
 
@@ -324,7 +324,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // leaf node: returns the type of literal value
-        visitLiteralExpression(ctx: LiteralExpressionContext): string {
+        visitLiteralExpression(ctx: LiteralExpressionContext): TypeInfo {
             const type =  ctx.CHAR_LITERAL()
                             ? "char"
                             : ctx.STRING_LITERAL()
@@ -339,54 +339,61 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             if (type === "UNKNOWN") {
                 error(`Unknown type for literal expression: ${ctx.getText()}`)
             }
-            log(`Expression: ${ctx.getText()}, has type: ${type}`, "PATH_EXPRESSION")
-            return type
+            log(`Expression: ${ctx.getText()}, has type: ${type}`, "LITERAL_EXPRESSION")
+            return {TypeName: type, Mutable: undefined}
         }
 
         // leaf node: returns the type of the symbol (by looking up type env)
-        visitPathExpression(ctx: PathExpressionContext): string {
+        visitPathExpression(ctx: PathExpressionContext): TypeInfo {
             const symbol = this.visitChildren(ctx)
             const type: TypeInfo = lookup_type(symbol, te)
             log(`Symbol: ${symbol}, has type: ${type}`, "PATH_EXPRESSION")
-            return type.Type;
+            return type;
         }
 
         // leaf node: returns the type declared in the declaration statement
-        visitType_?(ctx: Type_Context): string {
+        visitType_(ctx: Type_Context): string {  // TODO: this should return typeinfo to support reference types
             return this.visitChildren(ctx);
         }
     
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
-        visitLetStatement (ctx: LetStatementContext): string {
-            const expected_type: string = this.visit(ctx.type_());
-            const actual_type: string = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
-
-            if (expected_type != actual_type) {
+        visitLetStatement (ctx: LetStatementContext): TypeInfo {
+            const [_is_mut, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
+            const expected_type: TypeInfo = lookup_type(symbol, te);
+            const actual_type: TypeInfo = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
+            
+            if (expected_type.TypeName != actual_type.TypeName) {
                 error(`Type error in let statement; Expected type: ${expected_type}, actual type: ${actual_type}.`);
             }
 
-            return "undefined"; // statements produce undefined
+            return {TypeName: "undefined", Mutable: undefined} // statements produce undefined
         }
     
         // constantItem
         // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
         // ;
-        visitConstantItem(ctx: ConstantItemContext): string {
-            const expected_type: string = this.visit(ctx.type_());
-            const actual_type: string = this.visit(ctx.expression());
+        visitConstantItem(ctx: ConstantItemContext): TypeInfo {
+            const [_is_mut, symbol]: [boolean, string] = this.visit(ctx.identifier());
+            const expected_type: TypeInfo = lookup_type(symbol, te);
+            const actual_type: TypeInfo = this.visit(ctx.expression());
 
-            if (expected_type != actual_type) {
+            if (expected_type.TypeName != actual_type.TypeName) {
                 error(`Type error in constant declaration; Expected type: ${expected_type}, actual type: ${actual_type}.`);
             }
 
-            return "undefined"; // statements produce undefined
+            return {TypeName: "undefined", Mutable: undefined}; // statements produce undefined
         }
     
         // expression EQ expression
-        // TODO: mutable checking
-        visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
+        visitAssignmentExpression(ctx: AssignmentExpressionContext): TypeInfo {
+            const expected_type: TypeInfo = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
+            const actual_type: TypeInfo = this.visit(ctx.expression(1));
+            if (expected_type.TypeName != actual_type.TypeName || !expected_type.Mutable) {
+                error(`Type error in assignment; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+            }
+            return {TypeName: "undefined", Mutable: undefined}; // statements produce undefined
         }
         
         // identifierPattern
@@ -399,7 +406,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // whether the variable is mutable and
         // the second element is the variable name
         visitIdentifierPattern(ctx: IdentifierPatternContext): [boolean, string] {
-            return [ctx.KW_MUT() != null, this.visit(ctx.identifier())];
+            return (ctx.KW_MUT() != null, this.visit(ctx.identifier()))
         }
 
         // Return the string representation of the identifier
@@ -410,17 +417,32 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return ctx.getText();
         }
     
+        // tupleType
+        // : LPAREN ((type_ COMMA)+ type_?)? RPAREN
+        // ;
         // Returns unit type "()". This is the equivalent of "undefined" in js.
-        visitTupleType(ctx: TupleTypeContext): string {
+        visitTupleType(ctx: TupleTypeContext): TypeInfo {
             if (!ctx.type_()) {
-                return "undefined";
+                return {TypeName: "undefined", Mutable: undefined};
             } else {
                 error("Tuple type not supported.")
             }
         }
 
-        visitFunctionParameters(ctx: FunctionParametersContext): string[] {
 
+        visitTypePath(ctx: TypePathContext): TypeInfo {
+            return {TypeName: this.visitChildren(ctx), Mutable: undefined}; // currently does not su
+        }
+
+        visitFunctionParameters(ctx: FunctionParametersContext): {[key: string]: TypeInfo} {
+            let result: {[key: string]: TypeInfo} = {}
+            for (let i = 0; i < ctx.functionParam().length; i++) {
+                const param_type: string = this.visit(ctx.functionParam(i).functionParamPattern().type_());
+                const param_name: string = this.visit(ctx.functionParam(i).functionParamPattern().pattern());
+                result[param_name] = ({TypeName: param_type, Mutable: false});
+            }
+            
+            return result
         }
 
         visitFunctionReturnType(ctx: FunctionReturnTypeContext): string {
@@ -458,7 +480,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         error(`Missing type declaration for ${symbol}.`);
                     }
 
-                    let type: TypeInfo = { Type: this.visit(stmt.type_()), Mutable: is_mut };
+                    let type: TypeInfo = { TypeName: this.visit(stmt.type_()), Mutable: is_mut };
 
                     log(`FOUND LET LOCAL SYMBOL: ${symbol} with type ${type}`, "BLOCK_EXPRESSION");
                     syms.push(symbol);

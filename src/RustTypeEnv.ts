@@ -78,9 +78,15 @@ export const lookup_type = (x: string, e: object[]) => {
 }
 
 export interface TypeInfo {
-    TypeName: string,
+    TypeName: string | Closure,
     Mutable: boolean,
 }
+
+export interface Closure {
+    Params: {[key: string]: TypeInfo},
+    Return: TypeInfo,
+}
+
 
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[]) => {
