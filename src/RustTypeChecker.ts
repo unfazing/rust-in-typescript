@@ -348,26 +348,37 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return type.TypeName;
         }
     
-        // TODO: implement mutability and reference types
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
         visitLetStatement (ctx: LetStatementContext): string {
+            const expected_type: string = this.visit(ctx.type_());
+            const actual_type: string = this.visit(ctx.expression());
 
-            const expected_type = this.visit(ctx.type_());
+            if (expected_type != actual_type) {
+                error(`Type error in let statement; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+            }
 
-            const actual_type = this.visit(ctx.expression())
-            
+            return "undefined"; // statements produce undefined
         }
     
         // constantItem
         // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
         // ;
-        visitConstantItem(ctx: ConstantItemContext): undefined {
+        visitConstantItem(ctx: ConstantItemContext): string {
+            const expected_type: string = this.visit(ctx.type_());
+            const actual_type: string = this.visit(ctx.expression());
+
+            if (expected_type != actual_type) {
+                error(`Type error in constant declaration; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+            }
+
+            return "undefined"; // statements produce undefined
         }
     
     
         // expression EQ expression
+        // TODO: mutable checking
         visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
         }
         
@@ -467,11 +478,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             te = extend_type_environment(syms, types, te);
 
             // type check each statement in the block.
-            // the type of the block is the type of the last statement in the block.
-            const blockType: string = statements.reduce((_, stmt) => {
-                log(`Visiting child statement ${stmt.getText()}`, "BLOCK_EXPRESSION");
-                return this.visit(stmt); // should return the type of each statement
-            }, ""); 
+            // the type of the block is the type of the LAST statement/expression in the block.
+            let blockType: string;
+            statements.forEach(statement => {
+                log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
+                blockType = this.visit(statement);
+            });
 
             te = restore_type_environment(te);
 
