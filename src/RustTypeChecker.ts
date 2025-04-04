@@ -287,14 +287,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     if (visItem.function_()) {
                         const symbol = this.visit(visItem.function_().identifier());
 
-                        if (!visItem.function_().functionReturnType()) {
-                            error(`Missing return type for function ${symbol}.`);
-                        }
-
-                        const type: TypeInfo = {
-                            TypeName: this.visit(visItem.function_().functionReturnType()),
-                            Mutable: false,
-                        };
+                        let type: TypeInfo = visItem.function_().functionReturnType()
+                            ? { TypeName: this.visit(visItem.function_().functionReturnType()), Mutable: false }
+                            : { TypeName: "undefined", Mutable: false }; // automatically detect undeclared return type
 
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
                         locals.push(symbol);
@@ -441,19 +436,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         if (stmt.visItem().function_()) {
                             let symbol: string = this.visit(stmt.visItem().function_().identifier())
 
-                            let type: TypeInfo;
-                            if (!stmt.visItem().function_().functionReturnType()) {
-                                type = { 
-                                    TypeName: "undefined", // automatically detect type of undeclared function return type
-                                    Mutable: false 
-                                };
-                            } else {
-                                type = { 
-                                    TypeName: this.visit(stmt.visItem().function_().functionReturnType()), 
-                                    Mutable: false 
-                                };
-                            }
-                            
+                            let type: TypeInfo = stmt.visItem().function_().functionReturnType()
+                                ? { TypeName: this.visit(stmt.visItem().function_().functionReturnType()), Mutable: false }
+                                : { TypeName: "undefined", Mutable: false }; // automatically detect undeclared return type 
+                           
                             log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} of type ${type}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
                             types.push(type);
