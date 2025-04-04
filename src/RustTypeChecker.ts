@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { extend_type_environment, global_type_environment, lookup_type } from "./RustTypeEnv.js";
+import { extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -271,13 +271,13 @@ function log(message: any, enclosing_function: string): void {
     }
 }
 
-let te = global_type_environment
+let te: object[] = global_type_environment // an array of frame objects that map symbol to type
 
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
         // entry node
-        visitCrate (ctx: CrateContext): String {
-            let locals = []
-            let typelist = []
+        visitCrate (ctx: CrateContext): string {
+            let locals: string[] = []
+            let typelist: TypeInfo[] = []
             ctx.item().forEach(item => {
                 log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
                 
@@ -286,15 +286,32 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     
                     if (visItem.function_()) {
                         const symbol = this.visit(visItem.function_().identifier());
-                        const type = this.visit(visItem.function_().functionReturnType())
+
+                        if (!visItem.function_().functionReturnType()) {
+                            error(`Missing return type for function ${symbol}.`);
+                        }
+
+                        const type: TypeInfo = {
+                            TypeName: this.visit(visItem.function_().functionReturnType()),
+                            Mutable: false,
+                        };
+
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
-
                     }
                     else if (visItem.constantItem()) {
                         const symbol = this.visit(visItem.constantItem().identifier());
-                        const type = this.visit(visItem.constantItem().type_())
+
+                        if (!visItem.constantItem().type_()) {
+                            error(`Missing type for constant ${symbol}.`);
+                        }
+
+                        const type: TypeInfo = {
+                            TypeName: this.visit(visItem.constantItem().type_()),
+                            Mutable: false,
+                        };
+
                         log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
@@ -308,8 +325,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return this.visitChildren(ctx)
         }
     
-        // leaf node
-        visitLiteralExpression(ctx: LiteralExpressionContext): String {
+        // leaf node: returns the type of literal value
+        visitLiteralExpression(ctx: LiteralExpressionContext): string {
             const type =  ctx.CHAR_LITERAL()
                             ? "char"
                             : ctx.STRING_LITERAL()
@@ -328,22 +345,23 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return type
         }
 
-        // leaf node
-        visitPathExpression(ctx: PathExpressionContext): String {
+        // leaf node: returns the type of the symbol (by looking up type env)
+        visitPathExpression(ctx: PathExpressionContext): string {
             const symbol = this.visitChildren(ctx)
-            const type = lookup_type(symbol, te)
+            const type: TypeInfo = lookup_type(symbol, te)
             log(`Symbol: ${symbol}, has type: ${type}`, "PATH_EXPRESSION")
-            return type
+            return type.TypeName;
         }
     
         // TODO: implement mutability and reference types
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
-        visitLetStatement (ctx: LetStatementContext): String {
-            // let symbol = this.visit(ctx.patternNoTopAlt())
-            // let expr_type = this.visit(ctx.expression())
-            // log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
+        visitLetStatement (ctx: LetStatementContext): string {
+
+            const expected_type = this.visit(ctx.type_());
+
+            const actual_type = this.visit(ctx.expression())
             
         }
     
@@ -357,29 +375,37 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // expression EQ expression
         visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
         }
-    
+        
         // identifierPattern
         // : KW_REF? KW_MUT? identifier (AT pattern)?
         // ;
-        visitIdentifierPattern(ctx: IdentifierPatternContext): String {
-            return ctx.getText()
+        // returns a tuple, where first element is 
+        // whether the variable is mutable and
+        // the second element is the variable name
+        visitIdentifierPattern(ctx: IdentifierPatternContext): [boolean, string] {
+            return [ctx.KW_MUT() != null, this.visit(ctx.identifier())];
         }
     
-        visitIdentifier(ctx: IdentifierContext): String {
+        // return the string representation of the identifier
+        // the identifier is overloaded! It can either be:
+        // 1. the symbol of a variable (e.g. x)
+        // 2. the type of the variable (e.g. i32)
+        visitIdentifier(ctx: IdentifierContext): string {
+            return ctx.getText();
         }
     
         // blockExpression
         // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
         // ;
-        visitBlockExpression (ctx: BlockExpressionContext): String {
-            // scan out all local declarations and their types
-            // in AST, declarations are: 
+        visitBlockExpression (ctx: BlockExpressionContext): string {
+            // Scan out all local declarations and their types
+            // Declarations are:
             // 1. let statement
             // 2. constant item
             // 3. function declaration (function_)
 
-            let syms: number[] = [];
-            let types: String[] = [];
+            let syms: string[] = [];
+            let types: TypeInfo[] = [];
 
             const statements = ctx.statements().statement();
             statements.forEach(statement => {
@@ -389,11 +415,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
 
                 if (stmt instanceof LetStatementContext) {
-                    let symbol = this.visit(stmt.patternNoTopAlt());
+                    let [is_mut, symbol]: [boolean, string] = this.visit(stmt.patternNoTopAlt());
 
-                    let type = stmt.type_() 
-                        ? this.visit(stmt.type_())
-                        : error(`Missing type declaration for ${symbol}.`);
+                    if (!stmt.type_()) {
+                        error(`Missing type declaration for ${symbol}.`);
+                    }
+
+                    let type: TypeInfo = { TypeName: this.visit(stmt.type_()), Mutable: is_mut };
 
                     log(`FOUND LET LOCAL SYMBOL: ${symbol} with type ${type}`, "BLOCK_EXPRESSION");
                     syms.push(symbol);
@@ -402,22 +430,32 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 } else if (stmt instanceof ItemContext) {
                     if (stmt.visItem()) {
                         if (stmt.visItem().function_()) {
-                            let symbol = this.visit(stmt.visItem().function_().identifier())
+                            let symbol: string = this.visit(stmt.visItem().function_().identifier())
 
-                            let type = stmt.visItem().function_().functionReturnType() 
-                                ? this.visit(stmt.visItem().function_().functionReturnType())
-                                : error(`Missing return type for function ${symbol}.`);
+                            if (!stmt.visItem().function_().functionReturnType()) {
+                                error(`Missing return type for function ${symbol}.`);
+                            }
 
+                            let type: TypeInfo = { 
+                                TypeName: this.visit(stmt.visItem().function_().functionReturnType()), 
+                                Mutable: false 
+                            };
+                            
                             log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} of type ${type}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
                             types.push(type);
 
                         } else if (stmt.visItem().constantItem()) {
-                            let symbol = this.visit(stmt.visItem().constantItem().identifier())
+                            let symbol: string = this.visit(stmt.visItem().constantItem().identifier())
 
-                            let type = stmt.visItem().constantItem().type_()
-                                ? this.visit(stmt.visItem().constantItem().type_())
-                                : error(`Missing type declaration for constant ${symbol}.`);
+                            if (!stmt.visItem().constantItem().type_()) {
+                                error(`Missing type declaration for constant ${symbol}.`);
+                            }
+
+                            let type: TypeInfo = { 
+                                TypeName: this.visit(stmt.visItem().constantItem().type_()), 
+                                Mutable: false 
+                            };
 
                             log(`FOUND CONST LOCAL SYMBOL: ${symbol} of type ${symbol}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
@@ -427,14 +465,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 }
             })
 
-            // extend the type environment
+            te = extend_type_environment(syms, types, te);
 
+            // type check each statement in the block.
+            // the type of the block is the type of the last statement in the block.
+            const blockType: string = statements.reduce((_, stmt) => {
+                log(`Visiting child statement ${stmt.getText()}`, "BLOCK_EXPRESSION");
+                return this.visit(stmt); // should return the type of each statement
+            }, ""); 
 
-            // type check each statement in the block
+            te = restore_type_environment(te);
 
-
-            // restore the type environment
-
+            return blockType;
         }
     
         // function_
@@ -454,7 +496,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // expression LPAREN callParams? RPAREN
-        visitCallExpression(ctx: CallExpressionContext): String {
+        visitCallExpression(ctx: CallExpressionContext): string {
         }
     
         visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): undefined {
@@ -484,12 +526,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     
     // Override the default result method from AbstractParseTreeVisitor
-    protected defaultResult(): String {
+    protected defaultResult(): string {
         return ""
     }
     
     // Override the aggregate result method
-    protected aggregateResult(aggregate: String, nextResult: String): String {
+    protected aggregateResult(aggregate: string, nextResult: string): string {
         return nextResult;
     }
 }

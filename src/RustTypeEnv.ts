@@ -66,10 +66,10 @@ const global_type_frame = {
 
 // Type environment is a stack implemented with array 
 const empty_type_environment = null
-export const global_type_environment = [global_type_frame]
+export const global_type_environment: object[] = [global_type_frame]
 
-export const lookup_type = (x, e) => {
-    for (let i = e.length - 1; i >= 0; i--) {
+export const lookup_type = (x: string, e: object[]) => {
+    for (let i = e.length - 1; i >= 0; i--) { // TODO: currently O(N). Perhaps use compile environment implementation to reduce to O(1)
         if (e[i].hasOwnProperty(x) ) {
             return e[i][x]
         }
@@ -77,12 +77,18 @@ export const lookup_type = (x, e) => {
     return error("unbound name: " + x)
 }
 
+export interface TypeInfo {
+    TypeName: string,
+    Mutable: boolean,
+}
+
 // extend the environment destructively 
-export const extend_type_environment = (xs: string[], ts: string[], e: object[]) => {
+export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[]) => {
     if (ts.length > xs.length) 
         error('too few parameters in function declaration')
     if (ts.length < xs.length) 
         error('too many parameters in function declaration')
+
     const new_frame = {}
     for (let i = 0; i < xs.length; i++) 
         new_frame[xs[i]] = ts[i]
