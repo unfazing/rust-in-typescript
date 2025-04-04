@@ -254,8 +254,6 @@ const FUNCTIONS_LOGGING = {
     "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
     "COMPARISON_EXPRESSION": true,
     "LAZY_BOOLEAN_EXPRESSION": true,
-
-
 }
 
 function log(message: any, enclosing_function: string): void {
@@ -407,8 +405,8 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`<<< SCANNING OUT LOCAL DECLARATIONS >>>`, "BLOCK_EXPRESSION");
 
         const statements = ctx.statements().statement();
-        for (let i = 0; i < statements.length; i++) {
-            const stmt = ctx.statements().statement(i).getChild(0); // each statement can only have 1 child
+        statements.forEach(statement => {
+            const stmt = statement.getChild(0) // each statement can only have 1 child
             // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
             if (stmt instanceof LetStatementContext) {
                 let symbol = this.visit(stmt.patternNoTopAlt())
@@ -428,18 +426,22 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                     }
                 }
             }
-        }
+        })
+
         log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length };
         ce = compile_time_environment_extend(locals, ce)
         let first = true;
-        for (let i = 0; i < statements.length; i++) {
-            first ? (first = false): (instrs[wc++] = { tag: "POP" }
+        statements.forEach(stmt => {
+            if (first) {
+                first = false
+            } else {
+                instrs[wc++] = { tag: "POP" }
                 log("ADDING POP", "BLOCK_EXPRESSION")
-            );
-            log(`Visiting ${i} child statement ${ctx.statements().statement(i).getText()}`, "BLOCK_EXPRESSION")
-            this.visit(ctx.statements().statement(i))
-        }
+            }
+            log(`Visiting child statement ${stmt.getText()}`, "BLOCK_EXPRESSION")
+            this.visit(stmt)
+        })
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
     }
 

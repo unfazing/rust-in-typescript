@@ -5,7 +5,6 @@
 // add values destructively to the end of
 // given array; return the array
 const push = (array, ...items) => {
-	// fixed by Liew Zhao Wei, see Discussion 5
 	for (let item of items) {
 		array.push(item);
 	}
