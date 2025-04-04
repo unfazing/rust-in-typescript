@@ -228,7 +228,8 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { global_type_environment } from "./RustTypeEnv.js";
+import { extend_type_environment, global_type_environment, lookup_type } from "./RustTypeEnv.js";
+import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
     private visitor: TypeCheckerVisitor;
@@ -275,21 +276,75 @@ let te = global_type_environment
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
         // entry node
         visitCrate (ctx: CrateContext): String {
-            ctx.
+            let locals = []
+            let typelist = []
+            ctx.item().forEach(item => {
+                log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
+                
+                if (item.visItem()) {
+                    const visItem = item.visItem();
+                    
+                    if (visItem.function_()) {
+                        const symbol = this.visit(visItem.function_().identifier());
+                        const type = this.visit(visItem.function_().functionReturnType())
+                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
+                        locals.push(symbol);
+                        typelist.push(type)
+
+                    }
+                    else if (visItem.constantItem()) {
+                        const symbol = this.visit(visItem.constantItem().identifier());
+                        const type = this.visit(visItem.constantItem().type_())
+                        log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
+                        locals.push(symbol);
+                        typelist.push(type)
+                    } else {
+                        // throw error
+                    }
+                }
+            });
+            te = extend_type_environment(locals, typelist, te)
+            log(`TYPE ENVIRONMENT: ${te}`, "CRATE")
+            return this.visitChildren(ctx)
         }
     
         // leaf node
         visitLiteralExpression(ctx: LiteralExpressionContext): String {
+            const type =  ctx.CHAR_LITERAL()
+                            ? "char"
+                            : ctx.STRING_LITERAL()
+                            ? "str" // TODO: which one are we implementing? String:: vs &str
+                            : ctx.FLOAT_LITERAL()
+                            ? "f64"
+                            : ctx.INTEGER_LITERAL()
+                            ? "i32"
+                            : ctx.KW_FALSE() || ctx.KW_TRUE()
+                            ? "bool"
+                            : "UNKNOWN"
+            if (type === "UNKNOWN") {
+                error(`Unknown type for literal expression: ${ctx.getText()}`)
+            }
+            log(`Expression: ${ctx.getText()}, has type: ${type}`, "PATH_EXPRESSION")
+            return type
         }
-    
+
         // leaf node
         visitPathExpression(ctx: PathExpressionContext): String {
+            const symbol = this.visitChildren(ctx)
+            const type = lookup_type(symbol, te)
+            log(`Symbol: ${symbol}, has type: ${type}`, "PATH_EXPRESSION")
+            return type
         }
     
+        // TODO: implement mutability and reference types
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
         visitLetStatement (ctx: LetStatementContext): String {
+            // let symbol = this.visit(ctx.patternNoTopAlt())
+            // let expr_type = this.visit(ctx.expression())
+            // log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
+            
         }
     
         // constantItem
@@ -307,6 +362,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // : KW_REF? KW_MUT? identifier (AT pattern)?
         // ;
         visitIdentifierPattern(ctx: IdentifierPatternContext): String {
+            return ctx.getText()
         }
     
         visitIdentifier(ctx: IdentifierContext): String {
