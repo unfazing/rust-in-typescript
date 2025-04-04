@@ -347,13 +347,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             log(`Symbol: ${symbol}, has type: ${type}`, "PATH_EXPRESSION")
             return type.TypeName;
         }
+
+        // leaf node: returns the type declared in the declaration statement
+        visitType_?(ctx: Type_Context): string {
+            return this.visitChildren(ctx);
+        }
     
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
         visitLetStatement (ctx: LetStatementContext): string {
             const expected_type: string = this.visit(ctx.type_());
-            const actual_type: string = this.visit(ctx.expression());
+            const actual_type: string = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
 
             if (expected_type != actual_type) {
                 error(`Type error in let statement; Expected type: ${expected_type}, actual type: ${actual_type}.`);
@@ -376,7 +381,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return "undefined"; // statements produce undefined
         }
     
-    
         // expression EQ expression
         // TODO: mutable checking
         visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
@@ -385,14 +389,17 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // identifierPattern
         // : KW_REF? KW_MUT? identifier (AT pattern)?
         // ;
-        // returns a tuple, where first element is 
+        // 
+        // An identifierPattern is the name/symbol of a newly declared variable.
+        // 
+        // Return a tuple, where first element is 
         // whether the variable is mutable and
         // the second element is the variable name
         visitIdentifierPattern(ctx: IdentifierPatternContext): [boolean, string] {
             return [ctx.KW_MUT() != null, this.visit(ctx.identifier())];
         }
-    
-        // return the string representation of the identifier
+
+        // Return the string representation of the identifier
         // the identifier is overloaded! It can either be:
         // 1. the symbol of a variable (e.g. x)
         // 2. the type of the variable (e.g. i32)
