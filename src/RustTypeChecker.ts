@@ -229,6 +229,7 @@ import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
 import { global_type_environment } from "./RustTypeEnv.js";
+import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
     private visitor: TypeCheckerVisitor;
@@ -315,7 +316,70 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // blockExpression
         // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
         // ;
-        visitBlockExpression (ctx: BlockExpressionContext): undefined {
+        visitBlockExpression (ctx: BlockExpressionContext): String {
+            // scan out all local declarations and their types
+            // in AST, declarations are: 
+            // 1. let statement
+            // 2. constant item
+            // 3. function declaration (function_)
+
+            let syms: number[] = [];
+            let types: String[] = [];
+
+            const statements = ctx.statements().statement();
+            statements.forEach(statement => {
+                
+                const stmt = statement.getChild(0) // each statement can only have 1 child
+                
+                // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
+
+                if (stmt instanceof LetStatementContext) {
+                    let symbol = this.visit(stmt.patternNoTopAlt());
+
+                    let type = stmt.type_() 
+                        ? this.visit(stmt.type_())
+                        : error(`Missing type declaration for ${symbol}.`);
+
+                    log(`FOUND LET LOCAL SYMBOL: ${symbol} with type ${type}`, "BLOCK_EXPRESSION");
+                    syms.push(symbol);
+                    types.push(type);
+
+                } else if (stmt instanceof ItemContext) {
+                    if (stmt.visItem()) {
+                        if (stmt.visItem().function_()) {
+                            let symbol = this.visit(stmt.visItem().function_().identifier())
+
+                            let type = stmt.visItem().function_().functionReturnType() 
+                                ? this.visit(stmt.visItem().function_().functionReturnType())
+                                : error(`Missing return type for function ${symbol}.`);
+
+                            log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} of type ${type}`, "BLOCK_EXPRESSION");
+                            syms.push(symbol);
+                            types.push(type);
+
+                        } else if (stmt.visItem().constantItem()) {
+                            let symbol = this.visit(stmt.visItem().constantItem().identifier())
+
+                            let type = stmt.visItem().constantItem().type_()
+                                ? this.visit(stmt.visItem().constantItem().type_())
+                                : error(`Missing type declaration for constant ${symbol}.`);
+
+                            log(`FOUND CONST LOCAL SYMBOL: ${symbol} of type ${symbol}`, "BLOCK_EXPRESSION");
+                            syms.push(symbol);
+                            types.push(type);
+                        }
+                    }
+                }
+            })
+
+            // extend the type environment
+
+
+            // type check each statement in the block
+
+
+            // restore the type environment
+
         }
     
         // function_

@@ -77,7 +77,8 @@ export const lookup_type = (x, e) => {
     return error("unbound name: " + x)
 }
 
-export const extend_type_environment = (xs, ts, e) => {
+// extend the environment destructively 
+export const extend_type_environment = (xs: string[], ts: string[], e: object[]) => {
     if (ts.length > xs.length) 
         error('too few parameters in function declaration')
     if (ts.length < xs.length) 
@@ -85,5 +86,13 @@ export const extend_type_environment = (xs, ts, e) => {
     const new_frame = {}
     for (let i = 0; i < xs.length; i++) 
         new_frame[xs[i]] = ts[i]
-    return push([...e], new_frame)
+    // return push([...e], new_frame)
+    e.push(new_frame)
+    return e;
+}
+
+// extend the environment destructively 
+export const restore_type_environment = (e: object[]): object[] => {
+    e.pop(); // pop the last (most recent) frame
+    return e;
 }
