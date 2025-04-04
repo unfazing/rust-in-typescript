@@ -40,28 +40,31 @@ const unary_bool_type =
       res: "bool" }
       
 const global_type_frame = {
-    "undefined": "undefined",
-    math_E: "number",
-    math_PI: "number",
-    math_sin: unary_arith_type,
-    "+": binary_arith_type,
+    "None": "undefined",
+    // math_E: "number",
+    // math_PI: "number",
+    // math_sin: unary_arith_type,
+    "+": binary_arith_type, // TODO: overload with string concat
     "-": binary_arith_type,
     "*": binary_arith_type,
     "/": binary_arith_type,
+    "%": binary_arith_type,
+    "&": binary_arith_type,
+    "|": binary_arith_type,
+    "^": binary_arith_type,
     "<": number_comparison_type,
     ">": number_comparison_type,
     "<=": number_comparison_type,
     ">=": number_comparison_type,
-    "===": number_comparison_type,
+    "===": number_comparison_type, // TODO: to take any and return bool
+    "!==": number_comparison_type, // TODO: to take any and return bool
     "&&": binary_bool_type,
     "||": binary_bool_type,
     "-unary": unary_arith_type,
     "!": unary_bool_type
 }
 
-// A type environment is null or a pair 
-// whose head is a frame and whose tail 
-// is a type environment.
+// Type environment is a stack implemented with array 
 const empty_type_environment = null
 export const global_type_environment = [global_type_frame]
 
