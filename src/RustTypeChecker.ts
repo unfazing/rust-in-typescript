@@ -394,6 +394,15 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return ctx.getText();
         }
     
+        // Returns unit type "()". This is the equivalent of "undefined" in js.
+        visitTupleType(ctx: TupleTypeContext): string {
+            if (!ctx.type_()) {
+                return "undefined";
+            } else {
+                error("Tuple type not supported.")
+            }
+        }
+
         // blockExpression
         // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
         // ;
@@ -432,14 +441,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         if (stmt.visItem().function_()) {
                             let symbol: string = this.visit(stmt.visItem().function_().identifier())
 
+                            let type: TypeInfo;
                             if (!stmt.visItem().function_().functionReturnType()) {
-                                error(`Missing return type for function ${symbol}.`);
+                                type = { 
+                                    TypeName: "undefined", // automatically detect type of undeclared function return type
+                                    Mutable: false 
+                                };
+                            } else {
+                                type = { 
+                                    TypeName: this.visit(stmt.visItem().function_().functionReturnType()), 
+                                    Mutable: false 
+                                };
                             }
-
-                            let type: TypeInfo = { 
-                                TypeName: this.visit(stmt.visItem().function_().functionReturnType()), 
-                                Mutable: false 
-                            };
                             
                             log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} of type ${type}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
