@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { Closure, compare_type, extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo } from "./RustTypeEnv.js";
+import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -381,7 +381,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         visitMaybeNamedFunctionParameters(ctx: MaybeNamedFunctionParametersContext): TypeInfo[] {
-            let result: TypeInfo[];
+            let result: TypeInfo[] = [];
 
             for (let i = 0; i < ctx.maybeNamedParam().length; i++) {
                 const param_type: string = this.visit(ctx.maybeNamedParam(i).type_());
@@ -396,7 +396,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         visitFunctionParameters(ctx: FunctionParametersContext): TypeInfo[] {
-            let result: TypeInfo[];
+            let result: TypeInfo[] = [];
 
             for (let i = 0; i < ctx.functionParam().length; i++) {
                 const param_type: string = this.visit(ctx.functionParam(i).functionParamPattern().type_());
@@ -436,7 +436,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const actual_type: TypeInfo = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
             
             if (!compare_type(expected_type, actual_type)) {
-                error(`Type error in let statement; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+                error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
             }
 
             // TODO: implement ownership transfer (move)
@@ -453,7 +453,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const actual_type: TypeInfo = this.visit(ctx.expression());
 
             if (!compare_type(expected_type, actual_type)) {
-                error(`Type error in constant declaration; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+                error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
             }
 
             return { Type: "undefined" }; // statements produce undefined
@@ -463,8 +463,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitAssignmentExpression(ctx: AssignmentExpressionContext): TypeInfo {
             const expected_type: TypeInfo = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
             const actual_type: TypeInfo = this.visit(ctx.expression(1));
+            
             if (!compare_type(expected_type, actual_type) || !expected_type.Mutable) {
-                error(`Type error in assignment; Expected type: ${expected_type}, actual type: ${actual_type}.`);
+                error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
             }
 
             // TODO: implement ownership transfer (move)
@@ -593,11 +594,24 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // expression LPAREN callParams? RPAREN
-        visitCallExpression(ctx: CallExpressionContext): string {
+        visitCallExpression(ctx: CallExpressionContext): TypeInfo {
+            const expected_type: TypeInfo = this.visit(ctx.expression())
+
+            if (typeof expected_type.Type === "string") {
+                error("Type error in application; function application must have function type.")
+                return; // let typescript knows fun_type must be closure
+            }
+
+            const fun_type: Closure = expected_type.Type;
+            const expected_arg_types: TypeInfo[] = fun_type.Params;
+            const actual_arg_types: TypeInfo[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
+
+            // typecheck arguments
+            if (!compare_types(expected_arg_types, actual_arg_types)) {
+                error("Type error in application; argument types unmatched.")
+            }
             
-            
-            
-            return this.visit(ctx.expression()); // return type
+            return fun_type.Return; 
         }
     
         visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): undefined {

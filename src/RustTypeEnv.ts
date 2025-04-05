@@ -146,3 +146,17 @@ export const compare_types = (ts1: TypeInfo[], ts2: TypeInfo[]): boolean => {
 
     return true;
 };
+
+export const unparse_type = (t: TypeInfo): string => {
+    // Handle primitive types (string case)
+    if (typeof t.Type === 'string') {
+        return t.Type;
+    }
+    
+    // Handle closure types
+    const closure = t.Type;
+    const params = closure.Params.map(unparse_type).join(', ');
+    const return_type = unparse_type(closure.Return);
+    
+    return `fn(${params}) -> ${return_type}`;
+};
