@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { Closure, extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo } from "./RustTypeEnv.js";
+import { Closure, compare_type, extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -426,15 +426,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
         visitLetStatement (ctx: LetStatementContext): TypeInfo {
+            // Question: why look up type in environment when the type is declared?
             const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
             const expected_type: TypeInfo = lookup_type(symbol, te);
             const actual_type: TypeInfo = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
             
-            if (expected_type.Type != actual_type.Type) {
+            if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in let statement; Expected type: ${expected_type}, actual type: ${actual_type}.`);
             }
 
-            return {Type: "undefined", Mutable: undefined} // statements produce undefined
+            // TODO: implement ownership transfer (move)
+
+            return { Type: "undefined" } // statements produce undefined
         }
     
         // constantItem
@@ -445,21 +448,24 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const expected_type: TypeInfo = lookup_type(symbol, te);
             const actual_type: TypeInfo = this.visit(ctx.expression());
 
-            if (expected_type.Type != actual_type.Type) {
+            if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in constant declaration; Expected type: ${expected_type}, actual type: ${actual_type}.`);
             }
 
-            return {Type: "undefined", Mutable: undefined}; // statements produce undefined
+            return { Type: "undefined" }; // statements produce undefined
         }
     
         // expression EQ expression
         visitAssignmentExpression(ctx: AssignmentExpressionContext): TypeInfo {
             const expected_type: TypeInfo = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
             const actual_type: TypeInfo = this.visit(ctx.expression(1));
-            if (expected_type.Type != actual_type.Type || !expected_type.Mutable) {
+            if (!compare_type(expected_type, actual_type) || !expected_type.Mutable) {
                 error(`Type error in assignment; Expected type: ${expected_type}, actual type: ${actual_type}.`);
             }
-            return {Type: "undefined", Mutable: undefined}; // statements produce undefined
+
+            // TODO: implement ownership transfer (move)
+
+            return { Type: "undefined" }; // statements produce undefined
         }
         
         // identifierPattern

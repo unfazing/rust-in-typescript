@@ -110,5 +110,35 @@ export const restore_type_environment = (e: object[]): object[] => {
 }
 
 // TODO: compare type (closure or string)
-export const compare_type = (t1: TypeInfo, t2: TypeInfo) => {
-}
+export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
+    // Compare the Type property
+    if (typeof t1.Type !== typeof t2.Type) {
+        return false;
+    }
+
+    if (typeof t1.Type === 'string' && typeof t2.Type === 'string') {
+        return t1.Type === t2.Type;
+    }
+
+    if (typeof t1.Type !== 'string' && typeof t2.Type !== 'string') {
+        // Both are Closures - compare them recursively
+        const c1 = t1.Type as Closure;
+        const c2 = t2.Type as Closure;
+        
+        // Compare parameter lists
+        if (c1.Params.length !== c2.Params.length) {
+            return false;
+        }
+
+        for (let i = 0; i < c1.Params.length; i++) {
+            if (!compare_type(c1.Params[i], c2.Params[i])) {
+                return false;
+            }
+        }
+
+        // Compare return types
+        return compare_type(c1.Return, c2.Return);
+    }
+
+    return false;
+};
