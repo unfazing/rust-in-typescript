@@ -355,6 +355,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 return { Type: this.visitChildren(ctx) };
             } 
             
+            if (ctx.typeNoBounds().tupleType()) { // undefined type
+                return this.visit(ctx.typeNoBounds().tupleType())
+            }
+
             // TODO: support reference types. 
             if (ctx.typeNoBounds().referenceType()) { // reference
                 return
@@ -415,7 +419,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // ;
         // Returns unit type "()". This is the equivalent of "undefined" in js.
         visitTupleType(ctx: TupleTypeContext): TypeInfo {
-            if (!ctx.type_()) {
+            if (ctx.type_().length == 0) {
                 return { Type: "undefined" };
             } else {
                 error("Tuple type not supported.")

@@ -109,7 +109,6 @@ export const restore_type_environment = (e: object[]): object[] => {
     return e;
 }
 
-// TODO: compare type (closure or string)
 export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
     // Compare the Type property
     if (typeof t1.Type !== typeof t2.Type) {
