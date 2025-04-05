@@ -124,21 +124,26 @@ export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
         // Both are Closures - compare them recursively
         const c1 = t1.Type as Closure;
         const c2 = t2.Type as Closure;
-        
-        // Compare parameter lists
-        if (c1.Params.length !== c2.Params.length) {
-            return false;
-        }
-
-        for (let i = 0; i < c1.Params.length; i++) {
-            if (!compare_type(c1.Params[i], c2.Params[i])) {
-                return false;
-            }
-        }
 
         // Compare return types
-        return compare_type(c1.Return, c2.Return);
+        return compare_types(c1.Params, c2.Params) && compare_type(c1.Return, c2.Return);
     }
 
     return false;
+};
+
+export const compare_types = (ts1: TypeInfo[], ts2: TypeInfo[]): boolean => {
+    // First compare array lengths
+    if (ts1.length !== ts2.length) {
+        return false;
+    }
+
+    // Then compare each corresponding type
+    for (let i = 0; i < ts1.length; i++) {
+        if (!compare_type(ts1[i], ts2[i])) {  
+            return false;
+        }
+    }
+
+    return true;
 };
