@@ -78,12 +78,12 @@ export const lookup_type = (x: string, e: object[]) => {
 }
 
 export interface TypeInfo {
-    TypeName: string | Closure,
-    Mutable: boolean,
+    Type: string | Closure,
+    Mutable?: boolean,
 }
 
 export interface Closure {
-    Params: {[key: string]: TypeInfo},
+    Params: TypeInfo[],
     Return: TypeInfo,
 }
 
@@ -107,4 +107,8 @@ export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[
 export const restore_type_environment = (e: object[]): object[] => {
     e.pop(); // pop the last (most recent) frame
     return e;
+}
+
+// TODO: compare type (closure or string)
+export const compare_type = (t1: TypeInfo, t2: TypeInfo) => {
 }
