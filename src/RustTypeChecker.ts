@@ -761,18 +761,28 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // KW_WHILE expression /*except structExpression*/ blockExpression
-        visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): undefined {
+        visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): TypeInfo {
+            const predicate: ExpressionContext = ctx.expression();
+            const pred_type: TypeInfo = this.visit(predicate);
+
+            if (pred_type.Type !== "bool") {
+                error("Type error; expected predicate type: bool, " +
+                    "actual predicate type: " +
+                    unparse_type(pred_type))
+            }
+
+            this.visit(ctx.blockExpression()); // typecheck the body
+
+            return { Type: undefined } // while loops always have the unit type () in Rust
         }
     
-
-    
     // Override the default result method from AbstractParseTreeVisitor
-    protected defaultResult(): string {
+    protected defaultResult(): any {
         return ""
     }
     
     // Override the aggregate result method
-    protected aggregateResult(aggregate: string, nextResult: string): string {
+    protected aggregateResult(aggregate: any, nextResult: any): any {
         return nextResult;
     }
 }
