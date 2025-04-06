@@ -201,6 +201,10 @@ export const unparse_type = (t: Type): string => {
         const return_type = unparse_type(t.ReturnType);
         return `fn(${params}) -> ${return_type}`;
     }
+
+    if (t === UndefinedType) {
+        return "UndefinedType"
+    }
     
-    print_error("Unknown type");
+    print_error("[unparse_type] Unknown type");
 };

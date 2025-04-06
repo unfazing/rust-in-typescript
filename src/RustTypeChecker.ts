@@ -292,7 +292,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     
                     if (visItem.function_()) {
                         const fun_ctx: Function_Context = visItem.function_()
-                        const symbol = this.visit(fun_ctx.identifier());
+                        const symbol: string = this.visit(fun_ctx.identifier());
                         const paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []         
                         const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType 
                         const type: ClosureType = new ClosureType(paramTypes, returnType)
