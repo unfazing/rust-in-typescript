@@ -348,6 +348,23 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return type;
         }
 
+        // (AND | ANDAND) KW_MUT? expression
+        visitBorrowExpression(ctx: BorrowExpressionContext): TypeInfo {
+            const is_mut: boolean = (ctx.KW_MUT() != null)
+            const inner_type: TypeInfo = this.visit(ctx.expression());
+
+            if (ctx.AND()) {
+                let ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
+                return { Type: ref_type };
+            }
+
+            if (ctx.ANDAND()) {
+                let inner_ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
+                let outer_ref_type: RefType = { Inner: {Type: inner_ref_type}, Mutable: false };
+                return { Type: outer_ref_type };
+            }
+        }
+
         // leaf node: returns the type declared in the declaration statement
         visitType_(ctx: Type_Context): TypeInfo {  
 
