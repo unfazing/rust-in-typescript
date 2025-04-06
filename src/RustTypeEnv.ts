@@ -34,11 +34,11 @@ export const lookup_type = (x: string, e: object[]) => {
 }
 
 export interface TypeInfo {
-    Type: string | Closure | RefType,
+    Type: string | ClosureType | RefType,
     Mutable?: boolean, // optional: mutability is not a type, but a property of a type.
 }
 
-export interface Closure {
+export interface ClosureType {
     Params: TypeInfo[],
     Return: TypeInfo,
 }
@@ -48,7 +48,7 @@ export interface RefType {
     Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
 }
 
-export const isClosure = (t: unknown): t is Closure => {
+export const isClosureType = (t: unknown): t is ClosureType => {
     return typeof t === 'object' && t !== null && 'Params' in t && 'Return' in t;
 };
 
@@ -87,7 +87,7 @@ export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
         return t1.Type === t2.Type;
     }
 
-    if (isClosure(t1.Type) && isClosure(t2.Type)) {
+    if (isClosureType(t1.Type) && isClosureType(t2.Type)) {
         const c1 = t1.Type;
         const c2 = t2.Type;
 
@@ -133,7 +133,7 @@ export const unparse_type = (t: TypeInfo): string => {
     }
     
     // Handle closure types
-    if (isClosure(t.Type)) {
+    if (isClosureType(t.Type)) {
         const closure = t.Type;
         const params = closure.Params.map(unparse_type).join(', ');
         const return_type = unparse_type(closure.Return);

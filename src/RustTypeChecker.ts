@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, isClosure, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, isClosureType, isRefType, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -287,7 +287,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     if (visItem.function_()) {
                         const symbol = this.visit(visItem.function_().identifier());
 
-                        const closure: Closure = {
+                        const closure: ClosureType = {
                             Params: this.visit(visItem.function_().functionParameters()),
                             Return: this.visit(visItem.function_().functionReturnType())
                         } 
@@ -365,6 +365,20 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
         }
 
+        // STAR expression
+        visitDereferenceExpression(ctx: DereferenceExpressionContext): TypeInfo {
+            const type_info: TypeInfo = this.visit(ctx.expression()) // this must be a ref type
+
+            if (!isRefType(type_info.Type)) {
+                error(`Type error; dereferencing a non-reference type: ${unparse_type(type_info)}`);
+                return; // prevent TS lint from throwing type error
+            }
+            
+            const ref_type: RefType = type_info.Type;
+
+            return ref_type.Inner; // question: do we miss any info about the type mutability?
+        }
+
         // leaf node: returns the type declared in the declaration statement
         visitType_(ctx: Type_Context): TypeInfo {  
 
@@ -406,7 +420,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         visitBareFunctionType(ctx: BareFunctionTypeContext): TypeInfo {
-            const closure: Closure = {
+            const closure: ClosureType = {
                 Params: this.visit(ctx.functionParametersMaybeNamedVariadic()),  
                 Return: ctx.bareFunctionReturnType() ? {Type: " undefined"} : this.visit(ctx.bareFunctionReturnType())
             };
@@ -568,7 +582,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
                             let symbol: string = this.visit(stmt.visItem().function_().identifier())
 
-                            const closure: Closure = {
+                            const closure: ClosureType = {
                                 Params: this.visit(stmt.visItem().function_().functionParameters()),
                                 Return: this.visit(stmt.visItem().function_().functionReturnType())
                             } 
@@ -631,12 +645,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitCallExpression(ctx: CallExpressionContext): TypeInfo {
             const expected_type: TypeInfo = this.visit(ctx.expression())
 
-            if (!isClosure(expected_type.Type)) {
+            if (!isClosureType(expected_type.Type)) {
                 error("Type error in application; function application must have function type.")
                 return; // let typescript knows fun_type must be closure
             }
 
-            const fun_type: Closure = expected_type.Type;
+            const fun_type: ClosureType = expected_type.Type;
             const expected_arg_types: TypeInfo[] = fun_type.Params;
             const actual_arg_types: TypeInfo[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
 
