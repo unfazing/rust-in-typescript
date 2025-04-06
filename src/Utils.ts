@@ -7,6 +7,8 @@
 // String: string
 // Pointer: number
 
+import { error } from "console"
+
 class I32RustType {
     val
     constructor(val: number) {
@@ -43,4 +45,8 @@ class BooleanRustType {
 }
 
 class UnitRustType {
+}
+
+export function print_error(msg: string) {
+    error("[!!!!ERROR] " + msg)
 }

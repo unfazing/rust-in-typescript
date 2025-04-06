@@ -2,7 +2,7 @@
  * type environments
  * *****************/
 
-import { error } from "console"
+import { print_error } from "./Utils.js"
 
 /* **********************
  * using arrays as stacks
@@ -30,7 +30,7 @@ export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
             return e[i][x]
         }
     }
-    error("unbound name: " + x)
+    print_error("[lookup_type] Unbound name: " + x)
 }
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
@@ -122,9 +122,9 @@ export class MutableRefType extends RefType {
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:string]: Type}[]) => {
     if (ts.length > xs.length) 
-        error('too few parameters in function declaration')
+        print_error('too few parameters in function declaration')
     if (ts.length < xs.length) 
-        error('too many parameters in function declaration')
+        print_error('too many parameters in function declaration')
 
     if (xs.length == 0) {
         return e
@@ -202,5 +202,5 @@ export const unparse_type = (t: Type): string => {
         return `fn(${params}) -> ${return_type}`;
     }
     
-    error("Unknown type");
+    print_error("Unknown type");
 };
