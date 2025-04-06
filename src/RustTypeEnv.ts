@@ -34,8 +34,8 @@ export const lookup_type = (x: string, e: object[]) => {
 }
 
 export interface TypeInfo {
-    Type: string | Closure,
-    Mutable?: boolean,
+    Type: string | Closure | RefType,
+    Mutable?: boolean, // optional: mutability is not a type, but a property of a type.
 }
 
 export interface Closure {
@@ -43,6 +43,10 @@ export interface Closure {
     Return: TypeInfo,
 }
 
+export interface RefType {
+    Inner: TypeInfo
+    Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
+}
 
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[]) => {

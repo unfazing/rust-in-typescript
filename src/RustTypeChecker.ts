@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
+import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -337,7 +337,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 error(`Unknown type for literal expression: ${ctx.getText()}`)
             }
             log(`Expression: ${ctx.getText()}, has type: ${type}`, "LITERAL_EXPRESSION")
-            return {Type: type, Mutable: undefined}
+            return { Type: type }
         }
 
         // leaf node: returns the type of the symbol (by looking up type env)
@@ -351,24 +351,42 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // leaf node: returns the type declared in the declaration statement
         visitType_(ctx: Type_Context): TypeInfo {  
 
-            if (ctx.typeNoBounds().traitObjectTypeOneBound()) { // primitive type
+            if (!ctx.typeNoBounds()) {
+                error("Unsupported type.");
+            }
+
+            return this.visitChildren(ctx);
+        }
+
+        visitTypeNoBounds(ctx: TypeNoBoundsContext): TypeInfo {
+            if (ctx.traitObjectTypeOneBound()) { // primitive type
                 return { Type: this.visitChildren(ctx) };
             } 
             
-            if (ctx.typeNoBounds().tupleType()) { // undefined type
-                return this.visit(ctx.typeNoBounds().tupleType())
+            if (ctx.tupleType()) { // undefined type "()"
+                return this.visit(ctx.tupleType())
             }
 
-            // TODO: support reference types. 
-            if (ctx.typeNoBounds().referenceType()) { // reference
-                return
+            if (ctx.referenceType()) { // reference
+                return this.visit(ctx.referenceType());
             }
 
-            if (ctx.typeNoBounds().bareFunctionType()) { // function
-                return this.visit(ctx.typeNoBounds().bareFunctionType())
+            if (ctx.bareFunctionType()) { // function
+                return this.visit(ctx.bareFunctionType())
             } 
             
             error("Unsupported type.");
+        };
+
+        // referenceType
+        // : AND lifetime? KW_MUT? typeNoBounds
+        visitReferenceType(ctx: ReferenceTypeContext): TypeInfo {
+            
+            const is_mut: boolean = (ctx.KW_MUT() != null)
+            const inner_type: TypeInfo = this.visit(ctx.typeNoBounds());
+            
+            let ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
+            return {Type: ref_type};
         }
 
         visitBareFunctionType(ctx: BareFunctionTypeContext): TypeInfo {
@@ -470,7 +488,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             // TODO: implement ownership transfer (move)
 
-            return { Type: "undefined" }; // statements produce undefined
+            return { Type: "undefined" }; // assigment/expressin in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
         }
         
         // identifierPattern
