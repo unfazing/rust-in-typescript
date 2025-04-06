@@ -530,9 +530,9 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.visit(ctx.expression(0))
         this.visit(ctx.expression(1))
         let symbol = ctx.AND() != null
-                        ? "&&"
+                        ? "&"
                         : ctx.OR() != null
-                        ? "||"
+                        ? "|"
                         : ctx.MINUS() != null
                         ? "-"
                         : ctx.PERCENT() != null
