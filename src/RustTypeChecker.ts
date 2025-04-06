@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, isClosureType, isRefType, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -275,9 +275,9 @@ let te: object[] = global_type_environment // an array of frame objects that map
 
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
         // entry node
-        visitCrate (ctx: CrateContext): TypeInfo {
+        visitCrate (ctx: CrateContext): Type {
             let locals: string[] = []
-            let typelist: TypeInfo[] = []
+            let typelist: Type[] = []
             ctx.item().forEach(item => {
                 log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
                 
@@ -286,15 +286,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     
                     if (visItem.function_()) {
                         const symbol = this.visit(visItem.function_().identifier());
+                        const paramTypes: Type[] = this.visit(visItem.function_().functionParameters())
+                        const returnType: Type = this.visit(visItem.function_().functionReturnType()) 
+                        const type: ClosureType = new ClosureType(paramTypes, returnType)
 
-                        const closure: ClosureType = {
-                            Params: this.visit(visItem.function_().functionParameters()),
-                            Return: this.visit(visItem.function_().functionReturnType())
-                        } 
-
-                        let type: TypeInfo = { Type: closure };
-
-                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
+                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type.TypeName}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
                     }
@@ -305,7 +301,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                             error(`Missing type for constant ${symbol}.`);
                         }
 
-                        const type: TypeInfo = this.visit(visItem.constantItem().type_());
+                        const type: Type = this.visit(visItem.constantItem().type_());
 
                         log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
                         locals.push(symbol);
@@ -321,23 +317,23 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // leaf node: returns the type of literal value
-        visitLiteralExpression(ctx: LiteralExpressionContext): TypeInfo {
-            const type =  ctx.CHAR_LITERAL()
-                            ? "char"
-                            : ctx.STRING_LITERAL()
-                            ? "str" // TODO: which one are we implementing? String:: vs &str
-                            : ctx.FLOAT_LITERAL()
-                            ? "f64"
-                            : ctx.INTEGER_LITERAL()
-                            ? "i32"
-                            : ctx.KW_FALSE() || ctx.KW_TRUE()
-                            ? "bool"
-                            : "UNKNOWN"
+        visitLiteralExpression(ctx: LiteralExpressionContext): Type {
+            const type: ScalarTypeName =  ctx.CHAR_LITERAL()
+                                    ? "char"
+                                    // : ctx.STRING_LITERAL()
+                                    // ? "str" // TODO: which one are we implementing? String:: vs &str
+                                    : ctx.FLOAT_LITERAL()
+                                    ? "f64"
+                                    : ctx.INTEGER_LITERAL()
+                                    ? "i32"
+                                    : ctx.KW_FALSE() || ctx.KW_TRUE()
+                                    ? "bool"
+                                    : "UNKNOWN"
             if (type === "UNKNOWN") {
                 error(`Unknown type for literal expression: ${ctx.getText()}`)
             }
             log(`Expression: ${ctx.getText()}, has type: ${type}`, "LITERAL_EXPRESSION")
-            return { Type: type }
+            return new ScalarType(type)
         }
 
         // leaf node: returns the type of the symbol (by looking up type env)
@@ -380,8 +376,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         // leaf node: returns the type declared in the declaration statement
-        visitType_(ctx: Type_Context): TypeInfo {  
-
+        visitType_(ctx: Type_Context): TypeInfo {
             if (!ctx.typeNoBounds()) {
                 error("Unsupported type.");
             }
@@ -632,13 +627,32 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // )
         // ;
         visitFunction_ (ctx: Function_Context): undefined {
+            const expected_return_type: TypeInfo = this.visit(ctx.functionReturnType())
+            const param_types: TypeInfo[] = ctx.functionParameters() == null ? 0 : this.visit(ctx.functionParameters())
+            const param_names: string[] = []
+            let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null 
+                        ? 0
+                        : ctx.functionParameters().functionParam().length
+            for (let i = 0; i < arity; i++) {
+                param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern()[0])) // enters identifier()
+            }
+            log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types}`, "FUNCTION")
+
+            te = extend_type_environment(param_names, param_types, te)
+            const body_type  = this.visit()
+
+
         }
     
         insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
         }
     
         // KW_RETURN expression?
-        visitReturnExpression(ctx: ReturnExpressionContext): undefined {
+        visitReturnExpression(ctx: ReturnExpressionContext): TypeInfo {
+            if (ctx.expression() != null) {
+                return this.visit(ctx.expression())
+            }
+            return {Type: "undefined"}
         }
     
         // expression LPAREN callParams? RPAREN

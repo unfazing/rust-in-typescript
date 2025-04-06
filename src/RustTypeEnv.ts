@@ -33,35 +33,97 @@ export const lookup_type = (x: string, e: object[]) => {
     return error("unbound name: " + x)
 }
 
-export interface TypeInfo {
-    Type: string | ClosureType | RefType,
-    Mutable?: boolean, // optional: mutability is not a type, but a property of a type.
+export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
+export type TypeName = "closure" | "refType" | ScalarTypeName
+
+// Type is a class
+// TypeName is a string. 
+// In closures and references, the typename is automatically set to "closure"/"refType" on construction.
+// In scalars, the typename is the rust type, e.g. "i32"
+export abstract class Type {
+    Mutable: boolean
+    TypeName: TypeName
 }
 
-export interface ClosureType {
-    Params: TypeInfo[],
-    Return: TypeInfo,
+// t.Mutable is undefined in a ScalarType class as all scalars will be copied.
+export class ScalarType extends Type {
+    constructor(typeName: ScalarTypeName) {
+        super()
+        this.Mutable = undefined
+        this.TypeName = typeName
+    }
 }
 
-export interface RefType {
-    Inner: TypeInfo
-    Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
+// t.Mutable is undefined in a ClosureType class.
+export class ClosureType extends Type {
+    ParamTypes: Type[]
+    ReturnType: Type
+    constructor(paramTypes: Type[], returnTypes: Type) {
+        super()
+        this.ParamTypes = paramTypes
+        this.ReturnType = returnTypes
+        this.TypeName = "closure"
+        this.Mutable = undefined
+    }
 }
 
-export const isClosureType = (t: unknown): t is ClosureType => {
-    return typeof t === 'object' && t !== null && 'Params' in t && 'Return' in t;
-};
+export abstract class RefType extends Type {
+    InnerType: Type
+    constructor() {
+        super()
+        this.TypeName = "refType"
+    }
+}
 
-export const isRefType = (t: unknown): t is RefType => {
-    return typeof t === 'object' && t !== null && 'Inner' in t && 'Mutable' in t;
-};
+export class ImmutableRefType extends RefType {
+    constructor(innerType: Type) {
+        super()
+        this.Mutable = false
+        this.InnerType = innerType
+    }
+}
+
+export class MutableRefType extends RefType {
+    constructor(innerType: Type) {
+        super()
+        this.Mutable = true
+        this.InnerType = innerType
+    }
+}
+
+// export interface TypeInfo {
+//     Type: string | ClosureType | RefType,
+//     Mutable?: boolean, // optional: mutability is not a type, but a property of a type.
+// }
+
+// export interface ClosureType {
+//     Params: TypeInfo[],
+//     Return: TypeInfo,
+// }
+
+// export interface RefType {
+//     Inner: TypeInfo
+//     Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
+// }
+
+// export const isClosureType = (t: unknown): t is ClosureType => {
+//     return t instanceof ClosureType
+// };
+
+// export const isRefType = (t: unknown): t is RefType => {
+//     return t instanceof RefType
+// };
 
 // extend the environment destructively 
-export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[]) => {
+export const extend_type_environment = (xs: string[], ts: Type[], e: object[]) => {
     if (ts.length > xs.length) 
         error('too few parameters in function declaration')
     if (ts.length < xs.length) 
         error('too many parameters in function declaration')
+
+    if (xs.length == 0) {
+        return e
+    } 
 
     const new_frame = {}
     for (let i = 0; i < xs.length; i++) 
@@ -77,34 +139,27 @@ export const restore_type_environment = (e: object[]): object[] => {
     return e;
 }
 
-export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
-    // Compare the Type property
-    if (typeof t1.Type !== typeof t2.Type) {
+export const compare_type = (t1: Type, t2: Type): boolean => {
+    // Return false if Types of t1 and t2 are different
+    if (typeof t1 !== typeof t2) {
         return false;
     }
 
-    if (typeof t1.Type === 'string' && typeof t2.Type === 'string') {
-        return t1.Type === t2.Type;
+    // Compare Closures
+    if (t1 instanceof ClosureType) {
+        return compare_types(t1.ParamTypes, (t2 as ClosureType).ParamTypes) && compare_type(t1.ReturnType, (t2 as ClosureType).ReturnType);
     }
 
-    if (isClosureType(t1.Type) && isClosureType(t2.Type)) {
-        const c1 = t1.Type;
-        const c2 = t2.Type;
-
-        return compare_types(c1.Params, c2.Params) && compare_type(c1.Return, c2.Return);
+    // Compare References
+    if (t1 instanceof RefType) {
+        return compare_type(t1.InnerType, (t2 as RefType).InnerType);
     }
 
-    if (isRefType(t1.Type) && isRefType(t2.Type)) {
-        const r1 = t1.Type;
-        const r2 = t2.Type;
-
-        return r1.Mutable === r2.Mutable && compare_type(r1.Inner, r2.Inner);
-    }
-
-    return false;
+    // Compare Scalars
+    return t1.TypeName === t2.TypeName;
 };
 
-export const compare_types = (ts1: TypeInfo[], ts2: TypeInfo[]): boolean => {
+export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
     // First compare array lengths
     if (ts1.length !== ts2.length) {
         return false;
@@ -120,23 +175,22 @@ export const compare_types = (ts1: TypeInfo[], ts2: TypeInfo[]): boolean => {
     return true;
 };
 
-export const unparse_type = (t: TypeInfo): string => {
+export const unparse_type = (t: Type): string => {
     // Handle primitive types (string case)
-    if (typeof t.Type === 'string') {
-        return t.Type;
+    if (t instanceof ScalarType) {
+        return t.TypeName;
     }
 
     // Handle reference type
-    if (isRefType(t.Type)) {
-        const ref_str = t.Type.Mutable ? "&mut " : "&";
-        return `${ref_str}${unparse_type(t.Type.Inner)}`;
+    if (t instanceof RefType) {
+        const ref_str = t.Mutable ? "&mut " : "&";
+        return `${ref_str}${unparse_type(t.InnerType)}`;
     }
     
     // Handle closure types
-    if (isClosureType(t.Type)) {
-        const closure = t.Type;
-        const params = closure.Params.map(unparse_type).join(', ');
-        const return_type = unparse_type(closure.Return);
+    if (t instanceof ClosureType) {
+        const params = t.ParamTypes.map(unparse_type).join(', ');
+        const return_type = unparse_type(t.ReturnType);
         return `fn(${params}) -> ${return_type}`;
     }
     
