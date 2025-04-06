@@ -19,54 +19,10 @@ const push = (array, ...items) => {
 
 // Type frames are JavaScript objects that map 
 // symbols (strings) to types.
-const unary_arith_type =
-    { tag: "fun", args: ["number"], 
-      res: "number" }
-    
-const binary_arith_type =
-    { tag: "fun", args: ["number", "number"], 
-      res: "number" }
-
-const number_comparison_type =
-    { tag: "fun", args: ["number", "number"], 
-      res: "bool" }
-
-const binary_bool_type =
-    { tag: "fun", args: ["bool"], 
-      res: "bool" }
-      
-const unary_bool_type =
-    { tag: "fun", args: ["bool"], 
-      res: "bool" }
-      
-const global_type_frame = {
-    "None": "undefined",
-    // math_E: "number",
-    // math_PI: "number",
-    // math_sin: unary_arith_type,
-    "+": binary_arith_type, // TODO: overload with string concat
-    "-": binary_arith_type,
-    "*": binary_arith_type,
-    "/": binary_arith_type,
-    "%": binary_arith_type,
-    "&": binary_arith_type,
-    "|": binary_arith_type,
-    "^": binary_arith_type,
-    "<": number_comparison_type,
-    ">": number_comparison_type,
-    "<=": number_comparison_type,
-    ">=": number_comparison_type,
-    "===": number_comparison_type, // TODO: to take any and return bool
-    "!==": number_comparison_type, // TODO: to take any and return bool
-    "&&": binary_bool_type,
-    "||": binary_bool_type,
-    "-unary": unary_arith_type,
-    "!": unary_bool_type
-}
 
 // Type environment is a stack implemented with array 
-const empty_type_environment = null
-export const global_type_environment: object[] = [global_type_frame]
+const empty_type_environment = [{}]
+export const global_type_environment: object[] = empty_type_environment
 
 export const lookup_type = (x: string, e: object[]) => {
     for (let i = e.length - 1; i >= 0; i--) { // TODO: currently O(N). Perhaps use compile environment implementation to reduce to O(1)

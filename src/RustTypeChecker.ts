@@ -614,20 +614,106 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return fun_type.Return; 
         }
     
-        visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): undefined {
+        visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): TypeInfo {
+            const t1: TypeInfo = this.visit(ctx.expression(0));
+            const t2: TypeInfo = this.visit(ctx.expression(1));
+
+            let symbol = ctx.PLUS() != null
+                ? "+"
+                : ctx.MINUS() != null
+                    ? "-"
+                    : ctx.STAR() != null
+                        ? "*"
+                        : ctx.SLASH() != null
+                            ? "/"
+                            : ctx.PERCENT() != null
+                                ? "%"
+                                : ctx.AND() != null
+                                    ? "&"
+                                    : ctx.OR() != null
+                                        ? "|"
+                                        : ctx.CARET() != null
+                                            ? "^"
+                                            : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
+            
+            if (compare_type(t1, t2) && (t1.Type == 'i32' || t1.Type == 'f64')) {
+                return { Type: t1.Type }
+            } else {
+                error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+            }
         }
-    
+                
         // | expression ANDAND expression
         // | expression OROR expression
-        visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): any {
+        visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): TypeInfo {
+            const t1: TypeInfo = this.visit(ctx.expression(0));
+            const t2: TypeInfo = this.visit(ctx.expression(1));
+
+            const symbol = ctx.ANDAND() != null
+                ? "&&"
+                : ctx.OROR() != null
+                    ? "||"
+                    : error('Unknown boolean operator')
+
+            // Both operands must be boolean
+            if (t1.Type !== "bool" || t2.Type !== "bool") {
+                error(`Type error; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+            }
+
+            return { Type: "bool" };    
         }
     
         // expression comparisonOperator expression 
-        visitComparisonExpression(ctx: ComparisonExpressionContext): undefined {
+        visitComparisonExpression(ctx: ComparisonExpressionContext): TypeInfo {
+            const t1: TypeInfo = this.visit(ctx.expression(0));
+            const t2: TypeInfo = this.visit(ctx.expression(1));
+    
+            const op: ComparisonOperatorContext = ctx.comparisonOperator(); 
+            const symbol = op.EQEQ()
+                ? "==="
+                : op.GE()
+                    ? '>='
+                    : op.GT()
+                        ? ">"
+                        : op.LE()
+                            ? "<="
+                            : op.LT()
+                                ? "<"
+                                : op.NE()
+                                    ? "!=="
+                                    : error('Unknown comparison operator');
+
+            if (compare_type(t1, t2) && (t1.Type == 'i32' || t1.Type == 'f64')) {
+                return { Type: t1.Type }
+            } else {
+                error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+            }
         }
     
         // (MINUS | NOT) expression
-        visitNegationExpression(ctx: NegationExpressionContext): undefined {
+        visitNegationExpression(ctx: NegationExpressionContext): TypeInfo {
+            const t1: TypeInfo = this.visit(ctx.expression());
+            const sym = ctx.MINUS()
+                ? "!"
+                : ctx.NOT()
+                    ? "-unary"
+                    : error("Unknown unary operator");
+
+            switch (sym) {
+                case '!':
+                    if (t1.Type != "bool") {
+                        error(`Type error; Logical NOT operator '!' requires boolean operand, found ${unparse_type(t1)}`);
+                    }
+                    break;
+                    
+                case "-unary":
+                    if (t1.Type != "i32" && t1.Type != 'f64') {
+                        error(`Type error; Negation operator '-' requires numeric operand (i32 or f64), found ${unparse_type(t1)}`);
+                    }
+                    break;
+            }
+
+            return { Type: t1.Type };
         }
     
         // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
