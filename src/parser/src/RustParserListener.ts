@@ -30,7 +30,6 @@ import { AsClauseContext } from "./RustParser.js";
 import { UseDeclarationContext } from "./RustParser.js";
 import { UseTreeContext } from "./RustParser.js";
 import { Function_Context } from "./RustParser.js";
-import { FunctionBlockExpressionContext } from "./RustParser.js";
 import { FunctionQualifiersContext } from "./RustParser.js";
 import { AbiContext } from "./RustParser.js";
 import { FunctionParametersContext } from "./RustParser.js";
@@ -509,16 +508,6 @@ export class RustParserListener implements ParseTreeListener {
      * @param ctx the parse tree
      */
     exitFunction_?: (ctx: Function_Context) => void;
-    /**
-     * Enter a parse tree produced by `RustParser.functionBlockExpression`.
-     * @param ctx the parse tree
-     */
-    enterFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => void;
-    /**
-     * Exit a parse tree produced by `RustParser.functionBlockExpression`.
-     * @param ctx the parse tree
-     */
-    exitFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => void;
     /**
      * Enter a parse tree produced by `RustParser.functionQualifiers`.
      * @param ctx the parse tree

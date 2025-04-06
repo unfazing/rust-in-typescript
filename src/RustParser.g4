@@ -194,13 +194,9 @@ useTree
 // 6.4
 function_
     : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
-        functionBlockExpression
+        blockExpression
         | SEMI
     )
-    ;
-
-functionBlockExpression
-    : blockExpression
     ;
 
 functionQualifiers

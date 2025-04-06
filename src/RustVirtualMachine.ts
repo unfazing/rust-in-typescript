@@ -2,6 +2,7 @@
 
 import { error } from "console";
 import { builtin_array, primitive_object } from "./RustCompileTimeEnv";
+import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
 
     
 // Object.entries(require("sicp")).forEach(

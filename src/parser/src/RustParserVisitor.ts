@@ -30,7 +30,6 @@ import { AsClauseContext } from "./RustParser.js";
 import { UseDeclarationContext } from "./RustParser.js";
 import { UseTreeContext } from "./RustParser.js";
 import { Function_Context } from "./RustParser.js";
-import { FunctionBlockExpressionContext } from "./RustParser.js";
 import { FunctionQualifiersContext } from "./RustParser.js";
 import { AbiContext } from "./RustParser.js";
 import { FunctionParametersContext } from "./RustParser.js";
@@ -404,12 +403,6 @@ export class RustParserVisitor<Result> extends AbstractParseTreeVisitor<Result> 
      * @return the visitor result
      */
     visitFunction_?: (ctx: Function_Context) => Result;
-    /**
-     * Visit a parse tree produced by `RustParser.functionBlockExpression`.
-     * @param ctx the parse tree
-     * @return the visitor result
-     */
-    visitFunctionBlockExpression?: (ctx: FunctionBlockExpressionContext) => Result;
     /**
      * Visit a parse tree produced by `RustParser.functionQualifiers`.
      * @param ctx the parse tree

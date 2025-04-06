@@ -1,5 +1,5 @@
 import { AbstractParseTreeVisitor } from 'antlr4ng';
-import { CrateContext, ExpressionContext, FunctionBlockExpressionContext } from "./parser/src/RustParser.js";
+import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
 import { DelimTokenTreeContext } from "./parser/src/RustParser.js";
 import { TokenTreeContext } from "./parser/src/RustParser.js";
@@ -230,6 +230,7 @@ import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
 import { compile_time_environment_extend, compile_time_environment_position, global_compile_environment } from './RustCompileTimeEnv.js';
 import { error } from 'console';
+import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType } from './Utils.js';
 // wc: write counter
 let wc = 0;
 // instrs: instruction array
@@ -471,7 +472,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     visitFunction_ (ctx: Function_Context): undefined {
         let symbol = this.visit(ctx.identifier())
         let params = ctx.functionParameters()
-        let body = ctx.functionBlockExpression()
+        let body = ctx.blockExpression()
         log(`SYMBOL: ${symbol}`, "FUNCTION")
         this.insertClosure(params, body)
         instrs[wc++] = {
@@ -480,7 +481,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         };
     }
 
-    insertClosure(params_ctx: FunctionParametersContext, body_ctx: FunctionBlockExpressionContext): undefined {
+    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
         log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
         let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
         instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}

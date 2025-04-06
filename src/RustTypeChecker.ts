@@ -1,5 +1,5 @@
 import { AbstractParseTreeVisitor, ParseTree } from "antlr4ng";
-import { CrateContext, ExpressionContext, FunctionBlockExpressionContext } from "./parser/src/RustParser.js";
+import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
 import { DelimTokenTreeContext } from "./parser/src/RustParser.js";
 import { TokenTreeContext } from "./parser/src/RustParser.js";
@@ -568,8 +568,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             let types: Type[] = [];
 
             const statements = ctx.statements().statement();
-            statements.forEach(statement => {
-                
+            for (const statement of statements) {
                 const stmt = statement.getChild(0) // each statement can only have 1 child
                 
                 // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
@@ -616,17 +615,22 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         }
                     }
                 }
-            })
+            }
 
             te = extend_type_environment(syms, types, te);
 
             // type check each statement in the block.
             // the type of the block is the type of the LAST statement/expression in the block.
             let blockType: Type = UndefinedType;
-            statements.forEach(statement => {
+            for (const statement of statements) {
                 log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
-                blockType = this.visit(statement);
-            });
+                blockType = this.visit(statement)
+                if (statement.expressionStatement() && 
+                    statement.expressionStatement().expression() instanceof ReturnExpressionContext
+                ) {
+                    break
+                }
+            }
 
             te = restore_type_environment(te);
 
@@ -653,7 +657,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
             te = extend_type_environment(param_names, param_types, te)
-            const body_type  = this.visit(ctx.functionBlockExpression())
+            const body_type  = this.visit(ctx.blockExpression())
+            log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}}`, "FUNCTION_")
+
             te = restore_type_environment(te)
 
             if (!compare_type(expected_return_type, body_type)) {
@@ -662,11 +668,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             return UndefinedType
         }
-
-        // visitFunctionBlockExpression(ctx: FunctionBlockExpressionContext): Type {
-
-        // }
-    
     
         // KW_RETURN expression?
         visitReturnExpression(ctx: ReturnExpressionContext): Type {
@@ -836,7 +837,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             log(`CONSEQUENT BRANCH TYPE: ${then_type}, ALTERNATIVE BRANCH TYPE: ${else_type}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
 
-            if (else_type === UndefinedType || compare_type(then_type, else_type)) {
+            if (compare_type(then_type, else_type)) {
                 return then_type;
             } else {
                 print_error("Type error; Types of branches not matching; " +

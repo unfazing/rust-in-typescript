@@ -9,42 +9,42 @@
 
 import { error } from "console"
 
-class I32RustType {
+export class I32RustType {
     val
     constructor(val: number) {
         this.val = val
     }
 }
 
-class F64RustType {
+export class F64RustType {
     val
     constructor(val: number) {
         this.val = val
     }
 }
 
-class CharRustType {
+export class CharRustType {
     val
     constructor(val: String) {
         this.val = val
     }
 }
 
-class StringRustType {
+export class StringRustType {
     val
     constructor(val: String) {
         this.val = val
     }
 }
 
-class BooleanRustType {
+export class BooleanRustType {
     val
     constructor(val: boolean) {
         this.val = val
     }
 }
 
-class UnitRustType {
+export class UnitRustType {
 }
 
 export function print_error(msg: string) {
