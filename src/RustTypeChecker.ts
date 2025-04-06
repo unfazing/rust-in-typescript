@@ -636,7 +636,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                                             ? "^"
                                             : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
             
-            if (compare_type(t1, t2) && (t1.Type == 'i32' || t1.Type == 'f64')) {
+            if (compare_type(t1, t2) && (t1.Type === 'i32' || t1.Type === 'f64')) {
                 return { Type: t1.Type }
             } else {
                 error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
@@ -683,7 +683,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                                     ? "!=="
                                     : error('Unknown comparison operator');
 
-            if (compare_type(t1, t2) && (t1.Type == 'i32' || t1.Type == 'f64')) {
+            if (compare_type(t1, t2) && (t1.Type === 'i32' || t1.Type === 'f64')) {
                 return { Type: t1.Type }
             } else {
                 error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
@@ -701,13 +701,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             switch (sym) {
                 case '!':
-                    if (t1.Type != "bool") {
+                    if (t1.Type !== "bool") {
                         error(`Type error; Logical NOT operator '!' requires boolean operand, found ${unparse_type(t1)}`);
                     }
                     break;
-                    
+
                 case "-unary":
-                    if (t1.Type != "i32" && t1.Type != 'f64') {
+                    if (t1.Type !== "i32" && t1.Type !== 'f64') {
                         error(`Type error; Negation operator '-' requires numeric operand (i32 or f64), found ${unparse_type(t1)}`);
                     }
                     break;
@@ -716,8 +716,48 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return { Type: t1.Type };
         }
     
+        // test case for if else:
+        // let mut x = if true { 1 } else { 0 } => ALLOWED, treated as ternary expression.
+        // let mut x = if true { 42 }; => NOT ALLOWED, i32 !== undefined.
+        // let mut x = if true { 42; }; => ALLOWED, undefined === undefined .
+        //
         // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
-        visitIfExpression(ctx: IfExpressionContext): undefined {
+        visitIfExpression(ctx: IfExpressionContext): TypeInfo {
+            const predicate: ExpressionContext = ctx.expression(); 
+            const pred_type: TypeInfo = this.visit(predicate);
+
+            if (pred_type.Type !== "bool") {
+                error("Type error; expected predicate type: bool, " +
+                    "actual predicate type: " +
+                    unparse_type(pred_type))
+            }
+
+            const then_type: TypeInfo = this.visit(ctx.blockExpression(0));
+            
+            let else_type: TypeInfo = { Type: "undefined" };
+            if (ctx.KW_ELSE()) {
+                // this is an else block: else {}
+                if (ctx.blockExpression().length > 1) {
+                    else_type = this.visit(ctx.blockExpression(1))
+                }
+                // this is an else if block: else if (expression) {} 
+                else if (ctx.ifExpression()) {
+                    else_type = this.visit(ctx.ifExpression());
+                } else {
+                    // this is an if let expression: not within scope
+                    error("If let expression is out of scope.")
+                }
+            }
+
+            if (compare_type(then_type, else_type)) {
+                return then_type;
+            } else {
+                error("Type error; Types of branches not matching; " +
+                    "consequent type: " + 
+                    unparse_type(then_type) + ", " +
+                    "alternative type: " + 
+                    unparse_type(else_type))
+            }
         }
     
         // KW_WHILE expression /*except structExpression*/ blockExpression

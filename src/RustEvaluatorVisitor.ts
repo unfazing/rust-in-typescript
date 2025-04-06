@@ -640,7 +640,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                 this.visit(ctx.ifExpression());
             } else {
                 // this is an if let expression: not within scope
-                error("Error: Undefined expression")
+                error("Error: If let expression is out of scope.")
             }
 
             goto_instruction.addr = wc;
