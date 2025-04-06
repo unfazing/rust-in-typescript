@@ -1,5 +1,5 @@
 import { AbstractParseTreeVisitor, ParseTree } from "antlr4ng";
-import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
+import { CrateContext, ExpressionContext, FunctionBlockExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
 import { DelimTokenTreeContext } from "./parser/src/RustParser.js";
 import { TokenTreeContext } from "./parser/src/RustParser.js";
@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, UndefinedType, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -261,6 +261,7 @@ const FUNCTIONS_LOGGING = {
     "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
     "COMPARISON_EXPRESSION": true,
     "LAZY_BOOLEAN_EXPRESSION": true,
+    "FUNCTION_": true
 }
 
 function log(message: any, enclosing_function: string): void {
@@ -271,8 +272,12 @@ function log(message: any, enclosing_function: string): void {
     }
 }
 
-let te: object[] = global_type_environment // an array of frame objects that map symbol to type
+let te: {[key:string]: Type}[] = global_type_environment // an array of frame objects that map symbol to type
 
+// Notes:
+// Usually, visiting all the way to leaf nodes returns Type object (Tyoe defined in RustTypeEnv.ts)
+// The only leaf node that returns string is 'Identifier'
+// The 'IdentifierPattern' node will return a [boolean, string] tuple, representing is_mut and symbol name.
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
         // entry node
         visitCrate (ctx: CrateContext): Type {
@@ -285,11 +290,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     const visItem = item.visItem();
                     
                     if (visItem.function_()) {
-                        const symbol = this.visit(visItem.function_().identifier());
-                        const paramTypes: Type[] = this.visit(visItem.function_().functionParameters())
-                        const returnType: Type = this.visit(visItem.function_().functionReturnType()) 
+                        const fun_ctx: Function_Context = visItem.function_()
+                        const symbol = this.visit(fun_ctx.identifier());
+                        const paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []         
+                        const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType 
                         const type: ClosureType = new ClosureType(paramTypes, returnType)
-
+                        
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type.TypeName}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
@@ -307,7 +313,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         locals.push(symbol);
                         typelist.push(type)
                     } else {
-                        // throw error
+                        error("Unsupported Item type found in outermost scope. Only function and constant declaration allowed.")
                     }
                 }
             });
@@ -319,64 +325,62 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // leaf node: returns the type of literal value
         visitLiteralExpression(ctx: LiteralExpressionContext): Type {
             const type: ScalarTypeName =  ctx.CHAR_LITERAL()
-                                    ? "char"
-                                    // : ctx.STRING_LITERAL()
-                                    // ? "str" // TODO: which one are we implementing? String:: vs &str
-                                    : ctx.FLOAT_LITERAL()
-                                    ? "f64"
-                                    : ctx.INTEGER_LITERAL()
-                                    ? "i32"
-                                    : ctx.KW_FALSE() || ctx.KW_TRUE()
-                                    ? "bool"
-                                    : "UNKNOWN"
+                                        ? "char"
+                                        // : ctx.STRING_LITERAL()
+                                        // ? "str" // TODO: which one are we implementing? String:: vs &str
+                                        : ctx.FLOAT_LITERAL()
+                                        ? "f64"
+                                        : ctx.INTEGER_LITERAL()
+                                        ? "i32"
+                                        : ctx.KW_FALSE() || ctx.KW_TRUE()
+                                        ? "bool"
+                                        : "UNKNOWN"
             if (type === "UNKNOWN") {
                 error(`Unknown type for literal expression: ${ctx.getText()}`)
             }
-            log(`Expression: ${ctx.getText()}, has type: ${type}`, "LITERAL_EXPRESSION")
-            return new ScalarType(type)
+            log(`EXPRESSION: ${ctx.getText()}, HAS TYPE: ${type}`, "LITERAL_EXPRESSION")
+            return new ScalarType(type, undefined) // mutability does not apply to literals, only variables
         }
 
         // leaf node: returns the type of the symbol (by looking up type env)
-        visitPathExpression(ctx: PathExpressionContext): TypeInfo {
+        visitPathExpression(ctx: PathExpressionContext): Type {
             const symbol = this.visitChildren(ctx)
-            const type: TypeInfo = lookup_type(symbol, te)
-            log(`Symbol: ${symbol}, has type: ${type}`, "PATH_EXPRESSION")
+            const type: Type = lookup_type(symbol, te)
+            log(`SYMBOL: ${symbol}, HAS TYPE: ${type}`, "PATH_EXPRESSION")
             return type;
         }
 
         // (AND | ANDAND) KW_MUT? expression
-        visitBorrowExpression(ctx: BorrowExpressionContext): TypeInfo {
+        visitBorrowExpression(ctx: BorrowExpressionContext): Type {
             const is_mut: boolean = (ctx.KW_MUT() != null)
-            const inner_type: TypeInfo = this.visit(ctx.expression());
+            const inner_type: Type = this.visit(ctx.expression());
 
             if (ctx.AND()) {
-                let ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
-                return { Type: ref_type };
+                let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
+                return ref_type;
             }
 
             if (ctx.ANDAND()) {
-                let inner_ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
-                let outer_ref_type: RefType = { Inner: {Type: inner_ref_type}, Mutable: false };
-                return { Type: outer_ref_type };
+                let inner_ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
+                let outer_ref_type: RefType = new ImmutableRefType(inner_ref_type);
+                return outer_ref_type;
             }
         }
 
         // STAR expression
-        visitDereferenceExpression(ctx: DereferenceExpressionContext): TypeInfo {
-            const type_info: TypeInfo = this.visit(ctx.expression()) // this must be a ref type
+        visitDereferenceExpression(ctx: DereferenceExpressionContext): Type {
+            const expr_type: Type = this.visit(ctx.expression()) // this must be a ref type
 
-            if (!isRefType(type_info.Type)) {
-                error(`Type error; dereferencing a non-reference type: ${unparse_type(type_info)}`);
+            if (!(expr_type instanceof RefType)) {
+                error(`Type error; dereferencing a non-reference type: ${unparse_type(expr_type)}`);
                 return; // prevent TS lint from throwing type error
             }
             
-            const ref_type: RefType = type_info.Type;
-
-            return ref_type.Inner; // question: do we miss any info about the type mutability?
+            return expr_type.InnerType; // question: do we miss any info about the type mutability?
         }
 
         // leaf node: returns the type declared in the declaration statement
-        visitType_(ctx: Type_Context): TypeInfo {
+        visitType_(ctx: Type_Context): Type {
             if (!ctx.typeNoBounds()) {
                 error("Unsupported type.");
             }
@@ -384,9 +388,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return this.visitChildren(ctx);
         }
 
-        visitTypeNoBounds(ctx: TypeNoBoundsContext): TypeInfo {
+        visitTypeNoBounds(ctx: TypeNoBoundsContext): Type {
             if (ctx.traitObjectTypeOneBound()) { // primitive type
-                return { Type: this.visitChildren(ctx) };
+                return new ScalarType(this.visitChildren(ctx));
             } 
             
             if (ctx.tupleType()) { // undefined type "()"
@@ -406,52 +410,52 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // referenceType
         // : AND lifetime? KW_MUT? typeNoBounds
-        visitReferenceType(ctx: ReferenceTypeContext): TypeInfo {
+        visitReferenceType(ctx: ReferenceTypeContext): Type {
             const is_mut: boolean = (ctx.KW_MUT() != null)
-            const inner_type: TypeInfo = this.visit(ctx.typeNoBounds());
+            const inner_type: Type = this.visit(ctx.typeNoBounds());
             
-            let ref_type: RefType = { Inner: inner_type, Mutable: is_mut };
-            return {Type: ref_type};
+            let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
+            return ref_type;
         }
 
-        visitBareFunctionType(ctx: BareFunctionTypeContext): TypeInfo {
-            const closure: ClosureType = {
-                Params: this.visit(ctx.functionParametersMaybeNamedVariadic()),  
-                Return: ctx.bareFunctionReturnType() ? {Type: " undefined"} : this.visit(ctx.bareFunctionReturnType())
-            };
+        visitBareFunctionType(ctx: BareFunctionTypeContext): Type {
+            const closure: ClosureType = new ClosureType(
+                this.visit(ctx.functionParametersMaybeNamedVariadic()),
+                ctx.bareFunctionReturnType() ? UndefinedType : this.visit(ctx.bareFunctionReturnType())
+            )
 
-            return { Type: closure };
+            return closure;
         }
 
-        visitMaybeNamedFunctionParameters(ctx: MaybeNamedFunctionParametersContext): TypeInfo[] {
-            let result: TypeInfo[] = [];
+        visitMaybeNamedFunctionParameters(ctx: MaybeNamedFunctionParametersContext): Type[] {
+            let result: Type[] = [];
 
             for (let i = 0; i < ctx.maybeNamedParam().length; i++) {
-                const param_type: string = this.visit(ctx.maybeNamedParam(i).type_());
-                result.push({ Type: param_type });
+                const param_type: Type = this.visit(ctx.maybeNamedParam(i).type_());
+                result.push(param_type);
             }
             
             return result;
         }
 
-        visitBareFunctionReturnType(ctx: BareFunctionReturnTypeContext): TypeInfo {
-            return { Type: this.visit(ctx.typeNoBounds()) }
+        visitBareFunctionReturnType(ctx: BareFunctionReturnTypeContext): Type {
+            return this.visit(ctx.typeNoBounds())
         }
 
-        visitFunctionParameters(ctx: FunctionParametersContext): TypeInfo[] {
-            let result: TypeInfo[] = [];
+        visitFunctionParameters(ctx: FunctionParametersContext): Type[] {
+            let result: Type[] = [];
 
             for (let i = 0; i < ctx.functionParam().length; i++) {
-                const param_type: string = this.visit(ctx.functionParam(i).functionParamPattern().type_());
-                result.push({ Type: param_type });
+                const param_type: Type = this.visit(ctx.functionParam(i).functionParamPattern().type_());
+                result.push(param_type);
             }
             
             return result;
         }
 
-        visitFunctionReturnType(ctx: FunctionReturnTypeContext): TypeInfo {
+        visitFunctionReturnType(ctx: FunctionReturnTypeContext): Type {
             if (!ctx.type_()) {
-                return { Type: "undefined" };
+                return UndefinedType;
             } else {
                 return this.visit(ctx.type_());
             }
@@ -461,9 +465,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // : LPAREN ((type_ COMMA)+ type_?)? RPAREN
         // ;
         // Returns unit type "()". This is the equivalent of "undefined" in js.
-        visitTupleType(ctx: TupleTypeContext): TypeInfo {
+        visitTupleType(ctx: TupleTypeContext): Type {
             if (ctx.type_().length == 0) {
-                return { Type: "undefined" };
+                return UndefinedType;
             } else {
                 error("Tuple type not supported.")
             }
@@ -472,11 +476,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // letStatement
         // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
         // ;
-        visitLetStatement (ctx: LetStatementContext): TypeInfo {
+        visitLetStatement (ctx: LetStatementContext): Type {
             // Question: why look up type in environment when the type is declared?
+            // Not sure if scanning out into type environment works correctly now, would serve as a sanity check when we run
+            // Can directly access type when confident.
             const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
-            const expected_type: TypeInfo = lookup_type(symbol, te);
-            const actual_type: TypeInfo = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
+            const expected_type: Type = lookup_type(symbol, te);
+            const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
             
             if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
@@ -484,36 +490,39 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             // TODO: implement ownership transfer (move)
 
-            return { Type: "undefined" } // statements produce undefined
+            return UndefinedType // statements produce undefined
         }
     
         // constantItem
         // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
         // ;
-        visitConstantItem(ctx: ConstantItemContext): TypeInfo {
+        visitConstantItem(ctx: ConstantItemContext): Type {
             const [_is_mut, symbol]: [boolean, string] = this.visit(ctx.identifier());
-            const expected_type: TypeInfo = lookup_type(symbol, te);
-            const actual_type: TypeInfo = this.visit(ctx.expression());
+            const expected_type: Type = lookup_type(symbol, te);
+            const actual_type: Type = this.visit(ctx.expression());
 
             if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
             }
 
-            return { Type: "undefined" }; // statements produce undefined
+            return UndefinedType // statements produce undefined
         }
     
         // expression EQ expression
-        visitAssignmentExpression(ctx: AssignmentExpressionContext): TypeInfo {
-            const expected_type: TypeInfo = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
-            const actual_type: TypeInfo = this.visit(ctx.expression(1));
+        visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
+            const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
+            const actual_type: Type = this.visit(ctx.expression(1));
             
-            if (!compare_type(expected_type, actual_type) || !expected_type.Mutable) {
+            if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
             }
 
+            if (!expected_type.Mutable) {
+                error('Tried to assign when variable is immutable!')
+            }
             // TODO: implement ownership transfer (move)
 
-            return { Type: "undefined" }; // assigment/expressin in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
+            return UndefinedType // assigment/expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
         }
         
         // identifierPattern
@@ -540,7 +549,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // blockExpression
         // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
         // ;
-        visitBlockExpression (ctx: BlockExpressionContext): TypeInfo {
+        visitBlockExpression (ctx: BlockExpressionContext): Type {
             // Scan out all local declarations and their types
             // Declarations are:
             // 1. let statement
@@ -548,7 +557,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             // 3. function declaration (function_)
 
             let syms: string[] = [];
-            let types: TypeInfo[] = [];
+            let types: Type[] = [];
 
             const statements = ctx.statements().statement();
             statements.forEach(statement => {
@@ -564,29 +573,26 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         error(`Missing type declaration for ${symbol}.`);
                     }
 
-                    let type: TypeInfo = this.visit(stmt.type_());
+                    let type: Type = this.visit(stmt.type_());
                     type.Mutable = is_mut;
 
-                    log(`FOUND LET LOCAL SYMBOL: ${symbol} with type ${type}`, "BLOCK_EXPRESSION");
+                    log(`FOUND LET LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "BLOCK_EXPRESSION");
                     syms.push(symbol);
                     types.push(type);
 
                 } else if (stmt instanceof ItemContext) {
                     if (stmt.visItem()) {
                         if (stmt.visItem().function_()) {
+                            const fun_ctx = stmt.visItem().function_()
+                            let symbol: string = this.visit(fun_ctx.identifier())
+                            let paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
+                            let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType
+                            const closure: ClosureType = new ClosureType(paramTypes, returnType)
 
-                            let symbol: string = this.visit(stmt.visItem().function_().identifier())
-
-                            const closure: ClosureType = {
-                                Params: this.visit(stmt.visItem().function_().functionParameters()),
-                                Return: this.visit(stmt.visItem().function_().functionReturnType())
-                            } 
-
-                            let type: TypeInfo = { Type: closure };
                            
-                            log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} of type ${type}`, "BLOCK_EXPRESSION");
+                            log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${closure}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
-                            types.push(type);
+                            types.push(closure);
 
                         } else if (stmt.visItem().constantItem()) {
                             let symbol: string = this.visit(stmt.visItem().constantItem().identifier())
@@ -595,9 +601,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                                 error(`Missing type declaration for constant ${symbol}.`);
                             }
 
-                            let type: TypeInfo = this.visit(stmt.visItem().constantItem().type_());
+                            let type: Type = this.visit(stmt.visItem().constantItem().type_());
 
-                            log(`FOUND CONST LOCAL SYMBOL: ${symbol} of type ${symbol}`, "BLOCK_EXPRESSION");
+                            log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${symbol}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
                             types.push(type);
                         }
@@ -609,7 +615,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             // type check each statement in the block.
             // the type of the block is the type of the LAST statement/expression in the block.
-            let blockType: TypeInfo = { Type: "undefined" };
+            let blockType: Type = UndefinedType;
             statements.forEach(statement => {
                 log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
                 blockType = this.visit(statement);
@@ -626,80 +632,86 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         //     | SEMI
         // )
         // ;
-        visitFunction_ (ctx: Function_Context): undefined {
-            const expected_return_type: TypeInfo = this.visit(ctx.functionReturnType())
-            const param_types: TypeInfo[] = ctx.functionParameters() == null ? 0 : this.visit(ctx.functionParameters())
+        visitFunction_ (ctx: Function_Context): Type {
+            const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : UndefinedType
+            const param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : []
             const param_names: string[] = []
             let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null 
                         ? 0
                         : ctx.functionParameters().functionParam().length
+            log(`ARITY: ${arity}`, "FUNCTION_")
             for (let i = 0; i < arity; i++) {
-                param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern()[0])) // enters identifier()
+                param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern())) // enters identifier()
             }
             log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types}`, "FUNCTION")
 
             te = extend_type_environment(param_names, param_types, te)
-            const body_type  = this.visit()
+            const body_type  = this.visit(ctx.functionBlockExpression())
 
+            if (!compare_type(expected_return_type, body_type)) {
+                error(`Function body returns ${body_type} instead of the expected ${expected_return_type}`)
+            }
 
+            return UndefinedType
         }
+
+        // visitFunctionBlockExpression(ctx: FunctionBlockExpressionContext): Type {
+
+        // }
     
-        insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
-        }
     
         // KW_RETURN expression?
-        visitReturnExpression(ctx: ReturnExpressionContext): TypeInfo {
+        visitReturnExpression(ctx: ReturnExpressionContext): Type {
             if (ctx.expression() != null) {
                 return this.visit(ctx.expression())
             }
-            return {Type: "undefined"}
+            return UndefinedType
         }
     
         // expression LPAREN callParams? RPAREN
-        visitCallExpression(ctx: CallExpressionContext): TypeInfo {
-            const expected_type: TypeInfo = this.visit(ctx.expression())
+        visitCallExpression(ctx: CallExpressionContext): Type {
+            const expected_type: Type = this.visit(ctx.expression())
 
-            if (!isClosureType(expected_type.Type)) {
+            if (!(expected_type instanceof ClosureType)) {
                 error("Type error in application; function application must have function type.")
                 return; // let typescript knows fun_type must be closure
             }
 
-            const fun_type: ClosureType = expected_type.Type;
-            const expected_arg_types: TypeInfo[] = fun_type.Params;
-            const actual_arg_types: TypeInfo[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
+            const expected_arg_types: Type[] = expected_type.ParamTypes;
+            const actual_arg_types: Type[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
 
             // typecheck arguments
             if (!compare_types(expected_arg_types, actual_arg_types)) {
                 error("Type error in application; argument types unmatched.")
             }
             
-            return fun_type.Return; 
+            return expected_type.ReturnType; 
         }
     
-        visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): TypeInfo {
-            const t1: TypeInfo = this.visit(ctx.expression(0));
-            const t2: TypeInfo = this.visit(ctx.expression(1));
+        visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): Type {
+            const t1: Type = this.visit(ctx.expression(0));
+            const t2: Type = this.visit(ctx.expression(1));
 
-            let symbol = ctx.PLUS() != null
-                ? "+"
-                : ctx.MINUS() != null
-                    ? "-"
-                    : ctx.STAR() != null
-                        ? "*"
-                        : ctx.SLASH() != null
+            let symbol = ctx.PLUS()
+                            ? "+"
+                            : ctx.MINUS()
+                            ? "-"
+                            : ctx.STAR()
+                            ? "*"
+                            : ctx.SLASH()
                             ? "/"
-                            : ctx.PERCENT() != null
-                                ? "%"
-                                : ctx.AND() != null
-                                    ? "&"
-                                    : ctx.OR() != null
-                                        ? "|"
-                                        : ctx.CARET() != null
-                                            ? "^"
-                                            : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
+                            : ctx.PERCENT()
+                            ? "%"
+                            : ctx.AND()
+                            ? "&"
+                            : ctx.OR()
+                            ? "|"
+                            : ctx.CARET()
+                            ? "^"
+                            : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
             
-            if (compare_type(t1, t2) && (t1.Type === 'i32' || t1.Type === 'f64')) {
-                return { Type: t1.Type }
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
+                return new ScalarType(t1.TypeName) // TODO: check if can just return t1 here?
             } else {
                 error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
             }
@@ -707,9 +719,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 
         // | expression ANDAND expression
         // | expression OROR expression
-        visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): TypeInfo {
-            const t1: TypeInfo = this.visit(ctx.expression(0));
-            const t2: TypeInfo = this.visit(ctx.expression(1));
+        visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): Type {
+            const t1: Type = this.visit(ctx.expression(0));
+            const t2: Type = this.visit(ctx.expression(1));
 
             const symbol = ctx.ANDAND() != null
                 ? "&&"
@@ -718,64 +730,64 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     : error('Unknown boolean operator')
 
             // Both operands must be boolean
-            if (t1.Type !== "bool" || t2.Type !== "bool") {
+            if (t1.TypeName !== "bool" || t2.TypeName !== "bool") {
                 error(`Type error; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
             }
 
-            return { Type: "bool" };    
+            return new ScalarType("bool") // TODO: check if can just return t1 here?
         }
     
         // expression comparisonOperator expression 
-        visitComparisonExpression(ctx: ComparisonExpressionContext): TypeInfo {
-            const t1: TypeInfo = this.visit(ctx.expression(0));
-            const t2: TypeInfo = this.visit(ctx.expression(1));
+        visitComparisonExpression(ctx: ComparisonExpressionContext): Type {
+            const t1: Type = this.visit(ctx.expression(0));
+            const t2: Type = this.visit(ctx.expression(1));
     
             const op: ComparisonOperatorContext = ctx.comparisonOperator(); 
             const symbol = op.EQEQ()
-                ? "==="
-                : op.GE()
-                    ? '>='
-                    : op.GT()
-                        ? ">"
-                        : op.LE()
+                            ? "==="
+                            : op.GE()
+                            ? '>='
+                            : op.GT()
+                            ? ">"
+                            : op.LE()
                             ? "<="
                             : op.LT()
-                                ? "<"
-                                : op.NE()
-                                    ? "!=="
-                                    : error('Unknown comparison operator');
+                            ? "<"
+                            : op.NE()
+                            ? "!=="
+                            : error('Unknown comparison operator');
 
-            if (compare_type(t1, t2) && (t1.Type === 'i32' || t1.Type === 'f64')) {
-                return { Type: t1.Type }
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
+                return new ScalarType(t1.TypeName)
             } else {
                 error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
             }
         }
     
         // (MINUS | NOT) expression
-        visitNegationExpression(ctx: NegationExpressionContext): TypeInfo {
-            const t1: TypeInfo = this.visit(ctx.expression());
+        visitNegationExpression(ctx: NegationExpressionContext): Type {
+            const t1: Type = this.visit(ctx.expression());
             const sym = ctx.MINUS()
-                ? "!"
-                : ctx.NOT()
-                    ? "-unary"
-                    : error("Unknown unary operator");
+                        ? "!"
+                        : ctx.NOT()
+                        ? "-unary"
+                        : error("Unknown unary operator");
 
             switch (sym) {
                 case '!':
-                    if (t1.Type !== "bool") {
+                    if (t1.TypeName !== "bool") {
                         error(`Type error; Logical NOT operator '!' requires boolean operand, found ${unparse_type(t1)}`);
                     }
                     break;
 
                 case "-unary":
-                    if (t1.Type !== "i32" && t1.Type !== 'f64') {
+                    if (t1.TypeName !== "i32" && t1.TypeName !== 'f64') {
                         error(`Type error; Negation operator '-' requires numeric operand (i32 or f64), found ${unparse_type(t1)}`);
                     }
                     break;
             }
 
-            return { Type: t1.Type };
+            return new ScalarType(t1.TypeName as ScalarTypeName); // Will be either bool or numeric
         }
     
         // test case for if else:
@@ -784,19 +796,19 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // let mut x = if true { 42; }; => ALLOWED, undefined === undefined .
         //
         // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
-        visitIfExpression(ctx: IfExpressionContext): TypeInfo {
+        visitIfExpression(ctx: IfExpressionContext): Type {
             const predicate: ExpressionContext = ctx.expression(); 
-            const pred_type: TypeInfo = this.visit(predicate);
+            const pred_type: Type = this.visit(predicate);
 
-            if (pred_type.Type !== "bool") {
+            if (pred_type.TypeName !== "bool") {
                 error("Type error; expected predicate type: bool, " +
                     "actual predicate type: " +
                     unparse_type(pred_type))
             }
 
-            const then_type: TypeInfo = this.visit(ctx.blockExpression(0));
+            const then_type: Type = this.visit(ctx.blockExpression(0));
             
-            let else_type: TypeInfo = { Type: "undefined" };
+            let else_type: Type = UndefinedType;
             if (ctx.KW_ELSE()) {
                 // this is an else block: else {}
                 if (ctx.blockExpression().length > 1) {
@@ -823,11 +835,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         // KW_WHILE expression /*except structExpression*/ blockExpression
-        visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): TypeInfo {
+        visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): Type {
             const predicate: ExpressionContext = ctx.expression();
-            const pred_type: TypeInfo = this.visit(predicate);
+            const pred_type: Type = this.visit(predicate);
 
-            if (pred_type.Type !== "bool") {
+            if (pred_type.TypeName !== "bool") {
                 error("Type error; expected predicate type: bool, " +
                     "actual predicate type: " +
                     unparse_type(pred_type))
@@ -835,7 +847,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             this.visit(ctx.blockExpression()); // typecheck the body
 
-            return { Type: undefined } // while loops always have the unit type () in Rust
+            return UndefinedType // while loops always have the unit type () in Rust
         }
     
     // Override the default result method from AbstractParseTreeVisitor

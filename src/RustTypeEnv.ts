@@ -22,48 +22,53 @@ const push = (array, ...items) => {
 
 // Type environment is a stack implemented with array 
 const empty_type_environment = [{}]
-export const global_type_environment: object[] = empty_type_environment
+export const global_type_environment: {[key:string]: Type}[] = empty_type_environment
 
-export const lookup_type = (x: string, e: object[]) => {
+export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
     for (let i = e.length - 1; i >= 0; i--) { // TODO: currently O(N). Perhaps use compile environment implementation to reduce to O(1)
         if (e[i].hasOwnProperty(x) ) {
             return e[i][x]
         }
     }
-    return error("unbound name: " + x)
+    error("unbound name: " + x)
 }
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName
+export type TypeName = "closure" | "refType" | ScalarTypeName | "undefined"
 
 // Type is a class
 // TypeName is a string. 
 // In closures and references, the typename is automatically set to "closure"/"refType" on construction.
 // In scalars, the typename is the rust type, e.g. "i32"
+// t.Mutable is only meaningful for declared variables. e.g. let mut x: &i32; --> <ImmutableRefType>.Mutable = True
+// Otherwise, t.Mutable can be 'undefined' e.g. 3; --> <ScalarType>.Mutable = undefined
 export abstract class Type {
     Mutable: boolean
     TypeName: TypeName
 }
 
-// t.Mutable is undefined in a ScalarType class as all scalars will be copied.
 export class ScalarType extends Type {
-    constructor(typeName: ScalarTypeName) {
+    constructor(typeName: ScalarTypeName, is_mut?: boolean) {
         super()
-        this.Mutable = undefined
+        this.Mutable = is_mut
         this.TypeName = typeName
     }
 }
 
-// t.Mutable is undefined in a ClosureType class.
+export const UndefinedType: Type = {
+    TypeName: "undefined",
+    Mutable: false,
+};
+
 export class ClosureType extends Type {
     ParamTypes: Type[]
     ReturnType: Type
-    constructor(paramTypes: Type[], returnTypes: Type) {
+    constructor(paramTypes: Type[], returnTypes: Type, is_mut?: boolean) {
         super()
         this.ParamTypes = paramTypes
         this.ReturnType = returnTypes
         this.TypeName = "closure"
-        this.Mutable = undefined
+        this.Mutable = is_mut
     }
 }
 
@@ -76,18 +81,18 @@ export abstract class RefType extends Type {
 }
 
 export class ImmutableRefType extends RefType {
-    constructor(innerType: Type) {
+    constructor(innerType: Type, is_mut?: boolean) {
         super()
-        this.Mutable = false
         this.InnerType = innerType
+        this.Mutable = is_mut
     }
 }
 
 export class MutableRefType extends RefType {
-    constructor(innerType: Type) {
+    constructor(innerType: Type, is_mut?: boolean) {
         super()
-        this.Mutable = true
         this.InnerType = innerType
+        this.Mutable = is_mut
     }
 }
 
@@ -115,7 +120,7 @@ export class MutableRefType extends RefType {
 // };
 
 // extend the environment destructively 
-export const extend_type_environment = (xs: string[], ts: Type[], e: object[]) => {
+export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:string]: Type}[]) => {
     if (ts.length > xs.length) 
         error('too few parameters in function declaration')
     if (ts.length < xs.length) 
@@ -134,7 +139,7 @@ export const extend_type_environment = (xs: string[], ts: Type[], e: object[]) =
 }
 
 // extend the environment destructively 
-export const restore_type_environment = (e: object[]): object[] => {
+export const restore_type_environment = (e: {[key:string]: Type}[]): {[key:string]: Type}[] => {
     e.pop(); // pop the last (most recent) frame
     return e;
 }
@@ -154,9 +159,12 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     if (t1 instanceof RefType) {
         return compare_type(t1.InnerType, (t2 as RefType).InnerType);
     }
-
     // Compare Scalars
-    return t1.TypeName === t2.TypeName;
+    if (t1 instanceof ScalarType) {
+        return t1.TypeName === t2.TypeName;
+    }
+
+    return t1 === UndefinedType && t2 === UndefinedType;
 };
 
 export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
@@ -183,7 +191,7 @@ export const unparse_type = (t: Type): string => {
 
     // Handle reference type
     if (t instanceof RefType) {
-        const ref_str = t.Mutable ? "&mut " : "&";
+        const ref_str = t instanceof MutableRefType ? "&mut " : "&";
         return `${ref_str}${unparse_type(t.InnerType)}`;
     }
     

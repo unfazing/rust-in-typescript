@@ -36,6 +36,7 @@ import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 import { RustCompiler } from './RustCompiler.js';
+import { RustTypeChecker } from './RustTypeChecker.js';
 
 
 const chunk = `
@@ -44,32 +45,32 @@ fn main() {
     let mut test_mut_let: i32 = 2;
     fn test_closure(p1: i32, p2: i32) {
         const FILLER: i32 = 11;
-        return 3;
+        // return 3;
     }
     test_mut_let = test_mut_let + 6;
     test_closure(4, 5);
 
-    let mut x : i32 = 0;
-    while (x < 5) {
-        x = x + 1;
-    }
+    // let mut x : i32 = 0;
+    // while (x < 5) {
+    //     x = x + 1;
+    // }
 
-    if (true) {
-        1;
-    } // no else branch
+    // if (true) {
+    //     1;
+    // } // no else branch
 
-    fn validate(z: i32) -> bool {
-        return z >= 2;
-    }
+    // fn validate(z: i32) -> bool {
+    //     return z >= 2;
+    // }
 
-    const y : i32 = 5;
-    if (y < 2) { // comparisonExpression
-        return y;
-    } else if (validate(y)) { // functionCall + another if expression after else
-        return y;
-    } else {
-        return y;
-    }
+    // const y : i32 = 5;
+    // if (y < 2) { // comparisonExpression
+    //     return y;
+    // } else if (validate(y)) { // functionCall + another if expression after else
+    //     return y;
+    // } else {
+    //     return y;
+    // }
 }
 `
 
@@ -114,10 +115,13 @@ const tree = parser.crate();
 console.log(tree.toStringTree(parser));
 
 // Typechecker
+const type_checker = new RustTypeChecker();
+const type_result = type_checker.check(tree)
+console.log(type_result)
 
 // Compile
 const compiler = new RustCompiler();
-const instructions = compiler.compile(tree);
+// const instructions = compiler.compile(tree);
 
 // console.log(instructions);
 
@@ -130,7 +134,7 @@ function printInstructions(instrs: object[]): undefined {
     console.log(formattedInstructions);
 }
 
-printInstructions(instructions);
+// printInstructions(instructions);
 
 /*
 function main() {
@@ -219,18 +223,23 @@ exit
 47: POP  ""
 48: LDC true ""
 49: JOF  ""
-
+ENTER
 50: LDC 1 ""
-
+EXIT 54
 51: GOTO 53 ""
 52: LDC undefined ""
 53: POP  ""
+
+
+
 54: LDF  ""
 55: GOTO 62 ""
+ENTER
 56: LD [4, 0] ""
 57: LDC 2 ""
 58: BINOP ">=" ""
 59: RESET  ""
+EXIT
 60: LDC undefined ""
 61: RESET  ""
 62: ASSIGN [3, 4] ""
@@ -242,18 +251,24 @@ exit
 68: LDC 2 ""
 69: BINOP "<" ""
 70: JOF  ""
+ENTER
 71: LD [3, 5] ""
 72: RESET  ""
+EXIT
 73: GOTO 83 ""
 74: LD [3, 4] ""
 75: LD [3, 5] ""
 76: CALL  ""
 77: JOF  ""
+ENTER
 78: LD [3, 5] ""
 79: RESET  ""
+EXIT
 80: GOTO 83 ""
+ENTER
 81: LD [3, 5] ""
 82: RESET  ""
+Exit
 83: EXIT_SCOPE  ""
 84: LDC undefined ""
 85: RESET  ""
@@ -372,7 +387,10 @@ fn main() {
 52: {"tag":"ENTER_SCOPE","num":0} <<<
 53: {"tag":"LDC","val":"1"}
 54: {"tag":"EXIT_SCOPE"} <<<
-55: {"tag":"POP"}
+55: {"tag":"POP"} <<<
+
+
+
 56: {"tag":"LDF","arity":1,"addr":58}
 57: {"tag":"GOTO","addr":66}
 58: {"tag":"ENTER_SCOPE","num":0}
