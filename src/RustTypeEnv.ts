@@ -102,14 +102,10 @@ export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:strin
     if (ts.length < xs.length) 
         print_error('too many parameters in function declaration')
 
-    if (xs.length == 0) {
-        return e
-    } 
-
     const new_frame = {}
     for (let i = 0; i < xs.length; i++) 
         new_frame[xs[i]] = ts[i]
-    // return push([...e], new_frame)
+
     e.push(new_frame)
     return e;
 }
@@ -125,6 +121,11 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     if (typeof t1 !== typeof t2) {
         return false;
     }
+
+    // Compare at runtime the class type
+    // if (t1.constructor !== t2.constructor) {
+    //     return false;
+    // }
 
     // Compare Closures
     if (t1 instanceof ClosureType) {
