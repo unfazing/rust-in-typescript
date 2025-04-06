@@ -206,5 +206,9 @@ export const unparse_type = (t: Type): string => {
         return "UndefinedType"
     }
     
-    print_error("[unparse_type] Unknown type");
+    if (t === undefined) {
+        print_error(`[unparse_type] Cannot unparse undefined value: ${JSON.stringify(t)}`)
+    }
+
+    print_error(`[unparse_type] Unknown type of ${JSON.stringify(t)}`);
 };

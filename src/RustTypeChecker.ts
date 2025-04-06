@@ -1,4 +1,4 @@
-import { AbstractParseTreeVisitor, ParseTree } from "antlr4ng";
+import { AbstractParseTreeVisitor, ParseTree, TerminalNode } from "antlr4ng";
 import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
 import { DelimTokenTreeContext } from "./parser/src/RustParser.js";
@@ -280,6 +280,15 @@ let te: {[key:string]: Type}[] = global_type_environment // an array of frame ob
 // The only leaf node that returns string is 'Identifier'
 // The 'IdentifierPattern' node will return a [boolean, string] tuple, representing is_mut and symbol name.
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
+        visitTerminal(_node: TerminalNode): any {
+            const tokenText: string = _node.getText()
+            switch (tokenText) {
+                case ";":
+                    return UndefinedType // all statements end with ';'. They are undefined (other than return statements)
+            } 
+        }
+    
+    
         // entry node
         visitCrate (ctx: CrateContext): Type {
             let locals: string[] = []
@@ -622,15 +631,24 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             // type check each statement in the block.
             // the type of the block is the type of the LAST statement/expression in the block.
             let blockType: Type = UndefinedType;
+            let returned: boolean = false
             for (const statement of statements) {
                 log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
                 blockType = this.visit(statement)
                 if (statement.expressionStatement() && 
                     statement.expressionStatement().expression() instanceof ReturnExpressionContext
                 ) {
+                    log(`RETURN STATEMENT ENCOUNTERED: ${statement.getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
+                    returned = true
                     break
                 }
             }
+            if (!returned && ctx.statements().expression()) {
+                blockType = this.visit(ctx.statements().expression())
+                log(`FINAL EXPRESSION ENCOUNTERED: ${ctx.statements().expression().getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
+            }
+
+            log(`FINAL EVALUATED BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
 
             te = restore_type_environment(te);
 
@@ -657,8 +675,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
             te = extend_type_environment(param_names, param_types, te)
+            if (ctx.blockExpression() === null) {
+                print_error("Function without body!")
+            }
             const body_type  = this.visit(ctx.blockExpression())
-            log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}}`, "FUNCTION_")
+            log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
 
             te = restore_type_environment(te)
 
@@ -668,13 +689,22 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             return UndefinedType
         }
-    
-        // KW_RETURN expression?
-        visitReturnExpression(ctx: ReturnExpressionContext): Type {
-            if (ctx.expression() != null) {
+
+        visitExpressionStatement(ctx: ExpressionStatementContext): Type {
+            if (ctx.expression() instanceof ReturnExpressionContext) {
                 return this.visit(ctx.expression())
             }
             return UndefinedType
+        }
+
+        // KW_RETURN expression?
+        visitReturnExpression(ctx: ReturnExpressionContext): Type {
+            let returnType: Type = UndefinedType
+            if (ctx.expression()) {
+                returnType = this.visit(ctx.expression())
+            }
+            log(`RETURN TYPE: ${unparse_type(returnType)}`, "RETURN_EXPRESSION")
+            return returnType
         }
     
         // expression LPAREN callParams? RPAREN
