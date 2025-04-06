@@ -48,6 +48,14 @@ export interface RefType {
     Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
 }
 
+export const isClosure = (t: unknown): t is Closure => {
+    return typeof t === 'object' && t !== null && 'Params' in t && 'Return' in t;
+};
+
+export const isRefType = (t: unknown): t is RefType => {
+    return typeof t === 'object' && t !== null && 'Inner' in t && 'Mutable' in t;
+};
+
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: TypeInfo[], e: object[]) => {
     if (ts.length > xs.length) 
@@ -79,13 +87,18 @@ export const compare_type = (t1: TypeInfo, t2: TypeInfo): boolean => {
         return t1.Type === t2.Type;
     }
 
-    if (typeof t1.Type !== 'string' && typeof t2.Type !== 'string') {
-        // Both are Closures - compare them recursively
-        const c1 = t1.Type as Closure;
-        const c2 = t2.Type as Closure;
+    if (isClosure(t1.Type) && isClosure(t2.Type)) {
+        const c1 = t1.Type;
+        const c2 = t2.Type;
 
-        // Compare return types
         return compare_types(c1.Params, c2.Params) && compare_type(c1.Return, c2.Return);
+    }
+
+    if (isRefType(t1.Type) && isRefType(t2.Type)) {
+        const r1 = t1.Type;
+        const r2 = t2.Type;
+
+        return r1.Mutable === r2.Mutable && compare_type(r1.Inner, r2.Inner);
     }
 
     return false;
@@ -112,11 +125,20 @@ export const unparse_type = (t: TypeInfo): string => {
     if (typeof t.Type === 'string') {
         return t.Type;
     }
+
+    // Handle reference type
+    if (isRefType(t.Type)) {
+        const ref_str = t.Type.Mutable ? "&mut " : "&";
+        return `${ref_str}${unparse_type(t.Type.Inner)}`;
+    }
     
     // Handle closure types
-    const closure = t.Type;
-    const params = closure.Params.map(unparse_type).join(', ');
-    const return_type = unparse_type(closure.Return);
+    if (isClosure(t.Type)) {
+        const closure = t.Type;
+        const params = closure.Params.map(unparse_type).join(', ');
+        const return_type = unparse_type(closure.Return);
+        return `fn(${params}) -> ${return_type}`;
+    }
     
-    return `fn(${params}) -> ${return_type}`;
+    error("Unknown type");
 };

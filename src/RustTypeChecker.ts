@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
+import { Closure, compare_type, compare_types, extend_type_environment, global_type_environment, isClosure, lookup_type, RefType, restore_type_environment, TypeInfo, unparse_type } from "./RustTypeEnv.js";
 import { error } from "console";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -381,7 +381,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // referenceType
         // : AND lifetime? KW_MUT? typeNoBounds
         visitReferenceType(ctx: ReferenceTypeContext): TypeInfo {
-            
             const is_mut: boolean = (ctx.KW_MUT() != null)
             const inner_type: TypeInfo = this.visit(ctx.typeNoBounds());
             
@@ -615,7 +614,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitCallExpression(ctx: CallExpressionContext): TypeInfo {
             const expected_type: TypeInfo = this.visit(ctx.expression())
 
-            if (typeof expected_type.Type === "string") {
+            if (!isClosure(expected_type.Type)) {
                 error("Type error in application; function application must have function type.")
                 return; // let typescript knows fun_type must be closure
             }
