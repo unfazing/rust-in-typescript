@@ -297,7 +297,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType 
                         const type: ClosureType = new ClosureType(paramTypes, returnType)
                         
-                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${type.TypeName}`, "CRATE");
+                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
                     }
@@ -310,7 +310,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
                         const type: Type = this.visit(visItem.constantItem().type_());
 
-                        log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "CRATE");
+                        log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
                         locals.push(symbol);
                         typelist.push(type)
                     } else {
@@ -319,7 +319,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 }
             });
             te = extend_type_environment(locals, typelist, te)
-            log(`TYPE ENVIRONMENT: ${te}`, "CRATE")
+            log(`TYPE ENVIRONMENT: ${JSON.stringify(te)}`, "CRATE")
             return this.visitChildren(ctx)
         }
     
@@ -355,7 +355,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitBorrowExpression(ctx: BorrowExpressionContext): Type {
             const is_mut: boolean = (ctx.KW_MUT() != null)
             const inner_type: Type = this.visit(ctx.expression());
-            log(`BORROW HAS INNER_TYPE: ${inner_type}, AND IS_MUTABLE: ${is_mut}`, "BORROW_EXPRESSION");
+            log(`BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "BORROW_EXPRESSION");
 
             if (ctx.AND()) {
                 let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
@@ -372,13 +372,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // STAR expression
         visitDereferenceExpression(ctx: DereferenceExpressionContext): Type {
             const expr_type: Type = this.visit(ctx.expression()) // this must be a ref type
-            log(`TRYING TO DEREFERENCE AN EXPRESSION WITH TYPE: ${expr_type}`, "DEREFERENCE_EXPRESSION");
+            log(`TRYING TO DEREFERENCE AN EXPRESSION WITH TYPE: ${unparse_type(expr_type)}`, "DEREFERENCE_EXPRESSION");
 
             if (!(expr_type instanceof RefType)) {
                 error(`Type error; dereferencing a non-reference type: ${unparse_type(expr_type)}`);
                 return; // prevent TS lint from throwing type error
             }
-            log(`FOUND INNER TYPE: ${expr_type.InnerType}`, "DEREFERENCE_EXPRESSION");
+            log(`FOUND INNER TYPE: ${unparse_type(expr_type.InnerType)}`, "DEREFERENCE_EXPRESSION");
             return expr_type.InnerType; // question: do we miss any info about the type mutability?
         }
 
@@ -416,7 +416,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitReferenceType(ctx: ReferenceTypeContext): Type {
             const is_mut: boolean = (ctx.KW_MUT() != null)
             const inner_type: Type = this.visit(ctx.typeNoBounds());
-            log(`REFERENCE HAS INNER_TYPE: ${inner_type}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
+            log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
             
             let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
             return ref_type;
@@ -427,7 +427,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 this.visit(ctx.functionParametersMaybeNamedVariadic()),
                 ctx.bareFunctionReturnType() ? UndefinedType : this.visit(ctx.bareFunctionReturnType())
             )
-            log(`BARE FUNCTION HAS TYPE ${closure}`, "BARE_FUNCTION_TYPE");
+            log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
 
             return closure;
         }
@@ -487,7 +487,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
             const expected_type: Type = lookup_type(symbol, te);
             const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
-            log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${expected_type}, ACTUUAL TYPE: ${actual_type}`, "LET_STATEMENT");
+            log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
             if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
@@ -505,7 +505,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const [_is_mut, symbol]: [boolean, string] = this.visit(ctx.identifier());
             const expected_type: Type = lookup_type(symbol, te);
             const actual_type: Type = this.visit(ctx.expression());
-            log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${expected_type}, ACTUUAL TYPE: ${actual_type}`, "CONSTANT_ITEM");
+            log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
 
 
             if (!compare_type(expected_type, actual_type)) {
@@ -519,7 +519,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
             const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
             const actual_type: Type = this.visit(ctx.expression(1));
-            log(`EXPECTED_TYPE: ${expected_type}, ACTUUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
+            log(`EXPECTED_TYPE: ${expected_type}, ACTUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
 
             if (!compare_type(expected_type, actual_type)) {
                 error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
@@ -584,7 +584,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     let type: Type = this.visit(stmt.type_());
                     type.Mutable = is_mut;
 
-                    log(`FOUND LET LOCAL SYMBOL: ${symbol} WITH TYPE ${type}`, "BLOCK_EXPRESSION");
+                    log(`FOUND LET LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "BLOCK_EXPRESSION");
                     syms.push(symbol);
                     types.push(type);
 
@@ -598,7 +598,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                             const closure: ClosureType = new ClosureType(paramTypes, returnType)
 
                            
-                            log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${closure}`, "BLOCK_EXPRESSION");
+                            log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(closure)}`, "BLOCK_EXPRESSION");
                             syms.push(symbol);
                             types.push(closure);
 
@@ -651,13 +651,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             for (let i = 0; i < arity; i++) {
                 param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern())) // enters identifier()
             }
-            log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types}`, "FUNCTION")
+            log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION")
 
             te = extend_type_environment(param_names, param_types, te)
             const body_type  = this.visit(ctx.functionBlockExpression())
+            te = restore_type_environment(te)
 
             if (!compare_type(expected_return_type, body_type)) {
-                error(`Function body returns ${body_type} instead of the expected ${expected_return_type}`)
+                error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
             }
 
             return UndefinedType
@@ -679,7 +680,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // expression LPAREN callParams? RPAREN
         visitCallExpression(ctx: CallExpressionContext): Type {
             const expected_type: Type = this.visit(ctx.expression())
-            log(`EXPECTED CLOSURE TYPE: ${expected_type}`, "CALL_EXPRESSION");
+            log(`EXPECTED CLOSURE TYPE: ${unparse_type(expected_type)}`, "CALL_EXPRESSION");
             if (!(expected_type instanceof ClosureType)) {
                 error("Type error in application; function application must have function type.")
                 return; // let typescript knows fun_type must be closure
@@ -687,7 +688,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
             const expected_arg_types: Type[] = expected_type.ParamTypes;
             const actual_arg_types: Type[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
-            log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types}, ACTUAL ARGUMENT TYPES: ${actual_arg_types}`, "CALL_EXPRESSION");
+            log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types.map(x => unparse_type(x))}, ACTUAL ARGUMENT TYPES: ${actual_arg_types.map(x => unparse_type(x))}`, "CALL_EXPRESSION");
             // typecheck arguments
             if (!compare_types(expected_arg_types, actual_arg_types)) {
                 error("Type error in application; argument types unmatched.")
@@ -716,7 +717,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                             : ctx.CARET()
                             ? "^"
                             : error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`) 
-            log(`LEFT OPERAND TYPE: ${t1}, RIGHT OPERAND TYPE: ${t2}, SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
+            log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
             if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
                 return new ScalarType(t1.TypeName) // TODO: check if can just return t1 here?
             } else {
@@ -736,7 +737,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     ? "||"
                     : error('Unknown boolean operator')
         
-            log(`LEFT OPERAND TYPE: ${t1}, RIGHT OPERAND TYPE: ${t2}, SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION");
+            log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION");
             // Both operands must be boolean
             if (t1.TypeName !== "bool" || t2.TypeName !== "bool") {
                 error(`Type error; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
@@ -765,7 +766,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                             ? "!=="
                             : error('Unknown comparison operator');
 
-            log(`LEFT OPERAND TYPE: ${t1}, RIGHT OPERAND TYPE: ${t2}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
+            log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
             if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
                 return new ScalarType(t1.TypeName)
             } else {
@@ -782,7 +783,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         ? "-unary"
                         : error("Unknown unary operator");
 
-            log(`OPERAND TYPE: ${t1}, SYMBOL: ${sym}`, "NEGATION_EXPRESSION");
+            log(`OPERAND TYPE: ${unparse_type(t1)}, SYMBOL: ${sym}`, "NEGATION_EXPRESSION");
 
             switch (sym) {
                 case '!':
@@ -852,7 +853,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const predicate: ExpressionContext = ctx.expression();
             const pred_type: Type = this.visit(predicate);
 
-            log(`PREDICATE_TYPE: ${pred_type}`, "PREDICATE_LOOP_EXPRESSION");
+            log(`PREDICATE_TYPE: ${unparse_type(pred_type)}`, "PREDICATE_LOOP_EXPRESSION");
 
             if (pred_type.TypeName !== "bool") {
                 error("Type error; expected predicate type: bool, " +
