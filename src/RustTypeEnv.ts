@@ -63,12 +63,11 @@ export const UndefinedType: Type = {
 export class ClosureType extends Type {
     ParamTypes: Type[]
     ReturnType: Type
-    constructor(paramTypes: Type[], returnTypes: Type, is_mut?: boolean) {
+    constructor(paramTypes: Type[], returnTypes: Type) { // function is never mutable in Rust.
         super()
         this.ParamTypes = paramTypes
         this.ReturnType = returnTypes
         this.TypeName = "closure"
-        this.Mutable = is_mut
     }
 }
 
@@ -95,29 +94,6 @@ export class MutableRefType extends RefType {
         this.Mutable = is_mut
     }
 }
-
-// export interface TypeInfo {
-//     Type: string | ClosureType | RefType,
-//     Mutable?: boolean, // optional: mutability is not a type, but a property of a type.
-// }
-
-// export interface ClosureType {
-//     Params: TypeInfo[],
-//     Return: TypeInfo,
-// }
-
-// export interface RefType {
-//     Inner: TypeInfo
-//     Mutable: boolean // compulsory: mutable reference and immutable reference are concrete types.
-// }
-
-// export const isClosureType = (t: unknown): t is ClosureType => {
-//     return t instanceof ClosureType
-// };
-
-// export const isRefType = (t: unknown): t is RefType => {
-//     return t instanceof RefType
-// };
 
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:string]: Type}[]) => {
@@ -156,9 +132,14 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     }
 
     // Compare References
-    if (t1 instanceof RefType) {
-        return compare_type(t1.InnerType, (t2 as RefType).InnerType);
+    if (t1 instanceof ImmutableRefType) {
+        return compare_type(t1.InnerType, (t2 as ImmutableRefType).InnerType);
     }
+
+    if (t1 instanceof MutableRefType) {
+        return compare_type(t1.InnerType, (t2 as MutableRefType).InnerType);
+    }
+
     // Compare Scalars
     if (t1 instanceof ScalarType) {
         return t1.TypeName === t2.TypeName;
