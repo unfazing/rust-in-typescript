@@ -151,8 +151,11 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return t1.TypeName === t2.TypeName;
     }
 
-    // Finally, both must be unit type
-    return true;
+    if (t1 instanceof UnitType) {
+        return true;
+    } 
+
+    return false;
 };
 
 export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
