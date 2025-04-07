@@ -846,9 +846,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const param_types: Type[] = fun_type.ParamTypes;
 
         const param_names: string[] = []
-        let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null
-            ? 0
-            : ctx.functionParameters().functionParam().length
+        let arity = param_types.length;
         log(`ARITY: ${arity}`, "FUNCTION_")
         for (let i = 0; i < arity; i++) {
             const function_param = ctx.functionParameters().functionParam(i);
@@ -858,7 +856,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 return new UnitType();
             }
 
-            param_names.push(this.visit(function_param.functionParamPattern().pattern())) // enters identifier()
+            const [is_mut, parameter_name]: [boolean, string] = this.visit(function_param.functionParamPattern().pattern()); // enters visitIdentifierPattern()!!
+            
+            param_types[i].Mutable = is_mut;  // modify property of parameter type
+            param_names.push(parameter_name); 
         }
         log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
