@@ -715,6 +715,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return returnType
     }
 
+    // expression (COMMA expression)* COMMA?
+    visitCallParams(ctx: CallParamsContext): Type[] {
+        return ctx.expression().map(this.visit);
+    }
+
     // expression LPAREN callParams? RPAREN
     visitCallExpression(ctx: CallExpressionContext): Type {
         const expected_type: Type = this.visit(ctx.expression())
