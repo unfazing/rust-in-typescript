@@ -390,8 +390,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         if (!(expr_type instanceof RefType)) {
             print_error(`Type error; dereferencing a non-reference type: ${unparse_type(expr_type)}`);
-            return; // prevent TS lint from throwing type error
+            return new UnitType(); // prevent TS lint from throwing type error + prevent runtime error
         }
+
         log(`FOUND INNER TYPE: ${unparse_type(expr_type.InnerType)}`, "DEREFERENCE_EXPRESSION");
         return expr_type.InnerType; // question: do we miss any info about the type mutability?
     }
@@ -761,8 +762,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // referenceType
     // : AND lifetime? KW_MUT? typeNoBounds
     visitReferenceType(ctx: ReferenceTypeContext): Type {
-        const is_mut: boolean = (ctx.KW_MUT() != null)
+        const is_mut: boolean = (ctx.KW_MUT() != null);
         const inner_type: Type = this.visit(ctx.typeNoBounds());
+
+        // CRUCIAL: if mutable reference type, the inner type must be mutable as well.
+        // This invariant will be checked again in visitBorrowExpression() 
+        inner_type.Mutable = is_mut; 
+
         log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
 
         let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
