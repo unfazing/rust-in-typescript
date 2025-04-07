@@ -820,15 +820,34 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // )
     // ;
     visitFunction_(ctx: Function_Context): Type {
-        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType()
-        const param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : []
+
+        // look up function name (symbol) from type environment instead 
+        // for sanity check + prevent accessing null property
+        const symbol: string = this.visit(ctx.identifier());
+        const fun_type: Type = lookup_type(symbol, te); 
+
+        if (!(fun_type instanceof ClosureType)) {
+            print_error("Function type must be of closure type.");
+            return new UnitType();
+        }
+
+        const expected_return_type: Type = fun_type.ReturnType;
+        const param_types: Type[] = fun_type.ParamTypes;
+
         const param_names: string[] = []
         let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null
             ? 0
             : ctx.functionParameters().functionParam().length
         log(`ARITY: ${arity}`, "FUNCTION_")
         for (let i = 0; i < arity; i++) {
-            param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern())) // enters identifier()
+            const function_param = ctx.functionParameters().functionParam(i);
+
+            if (!function_param.functionParamPattern()) {
+                print_error("Function parameters must have their types declared.")
+                return new UnitType();
+            }
+
+            param_names.push(this.visit(function_param.functionParamPattern().pattern())) // enters identifier()
         }
         log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
@@ -866,7 +885,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitFunctionParam(ctx: FunctionParamContext): Type {
         if (!ctx.functionParamPattern() || !ctx.functionParamPattern().type_()) {
             print_error("Function parameter must have parameter name and type.");
-            return
+            return new UnitType(); // Assume undeclared types as unit type for now to prevent runtime exception
         }
 
         return this.visit(ctx.functionParamPattern().type_());
