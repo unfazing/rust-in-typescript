@@ -21,7 +21,7 @@ const push = (array, ...items) => {
 // symbols (strings) to types.
 
 // Type environment is a stack implemented with array 
-const empty_type_environment = [{}]
+const empty_type_environment = []
 export const global_type_environment: {[key:string]: Type}[] = empty_type_environment
 
 export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
@@ -34,7 +34,7 @@ export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
 }
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "undefined"
+export type TypeName = "closure" | "refType" | ScalarTypeName | "unit"
 
 // Type is a class
 // TypeName is a string. 
@@ -55,10 +55,13 @@ export class ScalarType extends Type {
     }
 }
 
-export const UndefinedType: Type = {
-    TypeName: "undefined",
-    Mutable: false,
-};
+export class UnitType extends Type {
+    constructor(is_mut?: boolean) {
+        super();
+        this.Mutable = is_mut;
+        this.TypeName = "unit";
+    }
+}
 
 export class ClosureType extends Type {
     ParamTypes: Type[]
@@ -117,15 +120,17 @@ export const restore_type_environment = (e: {[key:string]: Type}[]): {[key:strin
 }
 
 export const compare_type = (t1: Type, t2: Type): boolean => {
-    // Return false if Types of t1 and t2 are different
-    if (typeof t1 !== typeof t2) {
+    // typeof only returns primitive types and objects...
+    if (!(t1 instanceof Type) || !(t2 instanceof Type)) {
+        print_error(`[unparse_type] arguments are not of class Type: ${t1} and ${t2}`);
         return false;
     }
 
-    // Compare at runtime the class type
-    // if (t1.constructor !== t2.constructor) {
-    //     return false;
-    // }
+    // Compare the class type at runtime
+    // If different types, return false
+    if (t1.constructor !== t2.constructor) {
+        return false;
+    }
 
     // Compare Closures
     if (t1 instanceof ClosureType) {
@@ -146,7 +151,8 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return t1.TypeName === t2.TypeName;
     }
 
-    return t1 === UndefinedType && t2 === UndefinedType;
+    // Finally, both must be unit type
+    return true;
 };
 
 export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
@@ -184,8 +190,8 @@ export const unparse_type = (t: Type): string => {
         return `fn(${params}) -> ${return_type}`;
     }
 
-    if (t === UndefinedType) {
-        return "UndefinedType"
+    if (t instanceof UnitType) {
+        return "()";
     }
     
     if (t === undefined) {

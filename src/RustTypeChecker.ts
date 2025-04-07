@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, UndefinedType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -285,7 +285,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     //     const tokenText: string = _node.getText()
     //     switch (tokenText) {
     //         case ";":
-    //             return UndefinedType // all statements end with ';'. They are undefined (other than return statements)
+    //             return unitType // all statements end with ';'. They are undefined (other than return statements)
     //     }
     // }
 
@@ -303,7 +303,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                     const fun_ctx: Function_Context = visItem.function_()
                     const symbol: string = this.visit(fun_ctx.identifier());
                     const paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
-                    const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType
+                    const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType();
                     const type: ClosureType = new ClosureType(paramTypes, returnType)
 
                     log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
@@ -408,7 +408,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return new ScalarType(this.visitChildren(ctx));
         }
 
-        if (ctx.tupleType()) { // undefined type "()"
+        if (ctx.tupleType()) { // unit type "()"
             return this.visit(ctx.tupleType())
         }
 
@@ -437,7 +437,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitBareFunctionType(ctx: BareFunctionTypeContext): Type {
         const closure: ClosureType = new ClosureType(
             this.visit(ctx.functionParametersMaybeNamedVariadic()),
-            ctx.bareFunctionReturnType() ? UndefinedType : this.visit(ctx.bareFunctionReturnType())
+            ctx.bareFunctionReturnType() ? new UnitType() : this.visit(ctx.bareFunctionReturnType())
         )
         log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
 
@@ -471,7 +471,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     visitFunctionReturnType(ctx: FunctionReturnTypeContext): Type {
         if (!ctx.type_()) {
-            return UndefinedType;
+            return new UnitType();
         } else {
             return this.visit(ctx.type_());
         }
@@ -483,7 +483,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // Returns unit type "()". This is the equivalent of "undefined" in js.
     visitTupleType(ctx: TupleTypeContext): Type {
         if (ctx.type_().length == 0) {
-            return UndefinedType;
+            return new UnitType();
         } else {
             print_error("Tuple type not supported.")
         }
@@ -507,7 +507,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // TODO: implement ownership transfer (move)
 
-        return UndefinedType // statements produce undefined
+        return new UnitType(); // statements produce undefined
     }
 
     // constantItem
@@ -524,7 +524,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
-        return UndefinedType // statements produce undefined
+        return new UnitType() // statements produce undefined
     }
 
     // expression EQ expression
@@ -542,7 +542,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
         // TODO: implement ownership transfer (move)
 
-        return UndefinedType // assigment/expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
+        return new UnitType() // assigment/expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
     }
 
     // identifierPattern
@@ -577,7 +577,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // 3. function declaration (function_)
 
         if (!ctx.statements()) {
-            return UndefinedType;
+            return new UnitType();
         }
 
         let syms: string[] = [];
@@ -608,7 +608,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         const fun_ctx = stmt.visItem().function_()
                         let symbol: string = this.visit(fun_ctx.identifier())
                         let paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
-                        let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : UndefinedType
+                        let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType()
                         const closure: ClosureType = new ClosureType(paramTypes, returnType)
 
 
@@ -637,7 +637,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // type check each statement in the block.
         // the type of the block is the type of the LAST statement/expression in the block.
-        let blockType: Type = UndefinedType;
+        let blockType: Type = new UnitType();
         let returned: boolean = false
         for (const statement of statements) {
             log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
@@ -669,7 +669,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // )
     // ;
     visitFunction_(ctx: Function_Context): Type {
-        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : UndefinedType
+        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType()
         const param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : []
         const param_names: string[] = []
         let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null
@@ -695,19 +695,19 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
         }
 
-        return UndefinedType
+        return new UnitType()
     }
 
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
         if (ctx.expression() instanceof ReturnExpressionContext) {
             return this.visit(ctx.expression())
         }
-        return UndefinedType
+        return new UnitType()
     }
 
     // KW_RETURN expression?
     visitReturnExpression(ctx: ReturnExpressionContext): Type {
-        let returnType: Type = UndefinedType
+        let returnType: Type = new UnitType()
         if (ctx.expression()) {
             returnType = this.visit(ctx.expression())
         }
@@ -863,7 +863,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         const then_type: Type = this.visit(ctx.blockExpression(0));
 
-        let else_type: Type = UndefinedType;
+        let else_type: Type = new UnitType();
         if (ctx.KW_ELSE()) {
             // this is an else block: else {}
             if (ctx.blockExpression().length > 1) {
@@ -906,7 +906,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         this.visit(ctx.blockExpression()); // typecheck the body
 
-        return UndefinedType // while loops always have the unit type () in Rust
+        return new UnitType() // while loops always have the unit type () in Rust
     }
     
     // Override the default result method from AbstractParseTreeVisitor
