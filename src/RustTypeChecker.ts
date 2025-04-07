@@ -707,7 +707,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // KW_WHILE expression /*except structExpression*/ blockExpression
     visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): Type {
         const predicate: ExpressionContext = ctx.expression();
-        const pred_type: Type = this.visit(predicate);
+        const pred_type: Type = this.visit(predicate); // this is a group expression: "(expression)"
 
         log(`PREDICATE_TYPE: ${unparse_type(pred_type)}`, "PREDICATE_LOOP_EXPRESSION");
 
@@ -720,6 +720,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         this.visit(ctx.blockExpression()); // typecheck the body
 
         return new UnitType() // while loops always have the unit type () in Rust
+    }
+
+    // LPAREN innerAttribute* expression RPAREN
+    visitGroupedExpression(ctx: GroupedExpressionContext): Type {
+        return this.visit(ctx.expression());
     }
 
     // ------------------------------ TYPE ---------------------------------------------
