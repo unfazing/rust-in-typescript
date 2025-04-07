@@ -434,11 +434,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return ref_type;
     }
 
+    // forLifetimes? functionTypeQualifiers KW_FN LPAREN functionParametersMaybeNamedVariadic? RPAREN bareFunctionReturnType?    
     visitBareFunctionType(ctx: BareFunctionTypeContext): Type {
-        const closure: ClosureType = new ClosureType(
-            this.visit(ctx.functionParametersMaybeNamedVariadic()),
-            ctx.bareFunctionReturnType() ? new UnitType() : this.visit(ctx.bareFunctionReturnType())
-        )
+        const params_types: Type[] = ctx.functionParametersMaybeNamedVariadic() 
+            ? this.visit(ctx.functionParametersMaybeNamedVariadic()) 
+            : [];
+
+        const return_type: Type = ctx.bareFunctionReturnType() 
+            ? new UnitType() 
+            : this.visit(ctx.bareFunctionReturnType())
+
+        const closure: ClosureType = new ClosureType(params_types, return_type);
+
         log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
 
         return closure;
@@ -451,6 +458,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const param_type: Type = this.visit(ctx.maybeNamedParam(i).type_());
             result.push(param_type);
         }
+
         return result;
     }
 
@@ -619,7 +627,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         let paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
                         let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType()
                         const closure: ClosureType = new ClosureType(paramTypes, returnType)
-
 
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(closure)}`, "BLOCK_EXPRESSION");
                         syms.push(symbol);
