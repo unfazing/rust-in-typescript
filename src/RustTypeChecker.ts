@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ReturnType, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, peek, pop, push, RefType, restore_type_environment, ReturnType, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -274,6 +274,7 @@ function log(message: any, enclosing_function: string): void {
 }
 
 let te: {[key:string]: Type}[] = global_type_environment // an array of frame objects that map symbol to type
+let returnTypeStack: Type[] = [] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
 
 // Notes:
 // Usually, visiting all the way to leaf nodes returns Type object (Tyoe defined in RustTypeEnv.ts)
@@ -502,7 +503,19 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
         const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
-        const actual_type: Type = this.visit(ctx.expression(1));
+        let actual_type: Type = this.visit(ctx.expression(1));
+
+        // When IfExpression is used as Ternary, current behaviour is that the resulting type will be wrapped in a ReturnType
+        // e.g. x = if (true) { 6 } else { 7 };
+        if (actual_type instanceof ReturnType) {
+            if (!(ctx.expression(1) instanceof ExpressionWithBlock_Context)) {
+                print_error(`Type error in assignment expr; expression was wrapped in ReturnType (${unparse_type(actual_type)})` + 
+                ` as if it was returned by a Ternary, but the expression was not a Ternary.`);
+            }
+            log(`TERNARY FOUND IN ASSIGNMENT: ${ctx.expression(1).getText()}`, "ASSIGNMENT_EXPRESSION");
+            actual_type = actual_type.ReturnedType
+        }
+        
         log(`EXPECTED_TYPE: ${expected_type}, ACTUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
 
         if (!compare_type(expected_type, actual_type)) {
@@ -522,6 +535,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         let returnedType: Type = new UnitType()
         if (ctx.expression()) {
             returnedType = this.visit(ctx.expression())
+        }
+        if (!compare_type(returnedType, peek(returnTypeStack, 0))) {
+            print_error(`Type error in return statement; expected type: ${unparse_type(peek(returnTypeStack, 0))}, actual type: ${unparse_type(returnedType)}`);
         }
         const return_type = new ReturnType(returnedType)
         log(`RETURN TYPE: ${unparse_type(return_type)}`, "RETURN_EXPRESSION")
@@ -698,8 +714,16 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // Else, allow one block to be UnitType
         if (this.checkValidIfAndElseBlockTypes(then_type, else_type)) {
             if (!(then_type instanceof UnitType) && !(else_type instanceof UnitType)) {
-                return then_type instanceof ReturnType ? then_type : new ReturnType(then_type)
+                // Case both blocks evaluated to a Type. 
+                // if (!(then_type instanceof ReturnType) && !(else_type instanceof ReturnType)) {
+                //     // Case where both blocks evaluated to a Type by Expression, returns the Expression's type
+                //     return then_type
+                // } else {
+                //     // Case where at least one block evaluated to a Type by Return, returns a ReturnType
+                    return then_type instanceof ReturnType ? then_type : new ReturnType(then_type)
+                // }
             }
+
             return new UnitType()
         } else {
             print_error("Type error; Types of branches not matching; " +
@@ -881,6 +905,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         const expected_return_type: Type = fun_type.ReturnType;
+        returnTypeStack = push(returnTypeStack, expected_return_type); // push the return type of the function to the stack
         const param_types: Type[] = fun_type.ParamTypes;
 
         const param_names: string[] = []
@@ -915,6 +940,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (!compare_type(expected_return_type, body_type)) {
             print_error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
         }
+
+        returnTypeStack = pop(returnTypeStack) // pop the return type of the function from the stack
 
         return new UnitType()
     }
@@ -953,7 +980,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // : expression SEMI
     // | expressionWithBlock SEMI?
     // ;
-    //
+    // Expression Statement evaluates into
+    // UnitType -> when the expression is a statement
+    // ReturnType -> when the expression is a return statement
+    // Any Type -> when the expression is a ternary operator
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
         if (ctx.expression() instanceof ReturnExpressionContext) {
             return this.visit(ctx.expression())
@@ -973,7 +1003,19 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // Can directly access type when confident.
         const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         const expected_type: Type = lookup_type(symbol, te);
-        const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
+        let actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression (ternary)
+        
+        // When IfExpression is used as Ternary, current behaviour is that the resulting type will be wrapped in a ReturnType
+        // e.g. let mut x: i32 = if (true) { 6 } else { 7 };
+        if (actual_type instanceof ReturnType) {
+            if (!(ctx.expression() instanceof ExpressionWithBlock_Context)) {
+                print_error(`Type error in let statement; expression was wrapped in ReturnType (${unparse_type(actual_type)})` + 
+                ` as if it was returned by a Ternary, but the expression was not a Ternary.`);
+            }
+            log(`TERNARY FOUND IN LET STATEMENT: ${ctx.expression().getText()}`, "LET_STATEMENT");
+            actual_type = actual_type.ReturnedType
+        }
+        
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
         if (!compare_type(expected_type, actual_type)) {

@@ -10,12 +10,22 @@ import { print_error } from "./Utils.js"
 
 // add values destructively to the end of
 // given array; return the array
-const push = (array, ...items) => {
+export const push = (array, ...items) => {
 	for (let item of items) {
 		array.push(item);
 	}
 	return array;
 };
+
+export const pop = (array) => {
+	array.pop();
+	return array;
+}
+
+// return the last element of given array
+// without changing the array
+export const peek = (array, address) => array.slice(-1 - address)[0];
+
 
 // Type frames are JavaScript objects that map 
 // symbols (strings) to types.
@@ -132,7 +142,7 @@ export const restore_type_environment = (e: {[key:string]: Type}[]): {[key:strin
 export const compare_type = (t1: Type, t2: Type): boolean => {
     // typeof only returns primitive types and objects...
     if (!(t1 instanceof Type) || !(t2 instanceof Type)) {
-        print_error(`[compare_type] arguments are not of class Type: ${t1} and ${t2}`);
+        print_error(`[compare_type] arguments are not of class Type: ${unparse_type(t1)} and ${unparse_type(t2)}`);
         return false;
     }
 
