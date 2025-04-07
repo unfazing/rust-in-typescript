@@ -358,7 +358,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitPathExpression(ctx: PathExpressionContext): Type {
         const symbol = this.visitChildren(ctx)
         const type: Type = lookup_type(symbol, te)
-        log(`SYMBOL: ${symbol}, HAS TYPE: ${type}`, "PATH_EXPRESSION")
+        log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
 
@@ -531,7 +531,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // expression (COMMA expression)* COMMA?
     visitCallParams(ctx: CallParamsContext): Type[] {
-        return ctx.expression().map(this.visit);
+        return ctx.expression().map(expression => this.visit(expression));
     }
 
     // expression LPAREN callParams? RPAREN
@@ -544,8 +544,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         const expected_arg_types: Type[] = expected_type.ParamTypes;
-        const actual_arg_types: Type[] = ctx.callParams() ? [] : this.visit(ctx.callParams());
-        log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types.map(x => unparse_type(x))}, ACTUAL ARGUMENT TYPES: ${actual_arg_types.map(x => unparse_type(x))}`, "CALL_EXPRESSION");
+        const actual_arg_types: Type[] = ctx.callParams() ? this.visit(ctx.callParams()) : [];
+        log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types.map(unparse_type)}, ACTUAL ARGUMENT TYPES: ${actual_arg_types.map(unparse_type)}`, "CALL_EXPRESSION");
         // typecheck arguments
         if (!compare_types(expected_arg_types, actual_arg_types)) {
             print_error("Type error in application; argument types unmatched.")
