@@ -34,7 +34,7 @@ export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
 }
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "unit"
+export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType"
 
 // Type is a class
 // TypeName is a string. 
@@ -98,6 +98,16 @@ export class MutableRefType extends RefType {
     }
 }
 
+export class ReturnType extends Type {
+    ReturnedType: Type
+    constructor(returnedType: Type, is_mut?: boolean) {
+        super()
+        this.ReturnedType = returnedType
+        this.Mutable = is_mut
+        this.TypeName = "returnType"
+    }  
+}
+
 // extend the environment destructively 
 export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:string]: Type}[]) => {
     if (ts.length > xs.length) 
@@ -122,7 +132,7 @@ export const restore_type_environment = (e: {[key:string]: Type}[]): {[key:strin
 export const compare_type = (t1: Type, t2: Type): boolean => {
     // typeof only returns primitive types and objects...
     if (!(t1 instanceof Type) || !(t2 instanceof Type)) {
-        print_error(`[unparse_type] arguments are not of class Type: ${t1} and ${t2}`);
+        print_error(`[compare_type] arguments are not of class Type: ${t1} and ${t2}`);
         return false;
     }
 
@@ -130,6 +140,11 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     // If different types, return false
     if (t1.constructor !== t2.constructor) {
         return false;
+    }
+
+    // Compare ReturnTypes
+    if (t1 instanceof ReturnType) {
+        return compare_type(t1.ReturnedType, (t2 as ReturnType).ReturnedType)
     }
 
     // Compare Closures
@@ -195,6 +210,10 @@ export const unparse_type = (t: Type): string => {
 
     if (t instanceof UnitType) {
         return "()";
+    }
+
+    if (t instanceof ReturnType) {
+        return `retType<${unparse_type(t.ReturnedType)}>`
     }
     
     if (t === undefined) {

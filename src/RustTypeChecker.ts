@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, RefType, restore_type_environment, ReturnType, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -481,9 +481,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         for (const statement of statements) {
             log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
             blockType = this.visit(statement)
-            if (statement.expressionStatement() &&
-                statement.expressionStatement().expression() instanceof ReturnExpressionContext
-            ) {
+            if (blockType instanceof ReturnType) {
                 log(`RETURN STATEMENT ENCOUNTERED: ${statement.getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
                 returned = true
                 break
@@ -520,13 +518,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     }
 
     // KW_RETURN expression?
-    visitReturnExpression(ctx: ReturnExpressionContext): Type {
-        let returnType: Type = new UnitType()
+    visitReturnExpression(ctx: ReturnExpressionContext): ReturnType {
+        let returnedType: Type = new UnitType()
         if (ctx.expression()) {
-            returnType = this.visit(ctx.expression())
+            returnedType = this.visit(ctx.expression())
         }
-        log(`RETURN TYPE: ${unparse_type(returnType)}`, "RETURN_EXPRESSION")
-        return returnType
+        const return_type = new ReturnType(returnedType)
+        log(`RETURN TYPE: ${unparse_type(return_type)}`, "RETURN_EXPRESSION")
+        return return_type
     }
 
     // expression (COMMA expression)* COMMA?
@@ -692,10 +691,16 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
         }
 
-        log(`CONSEQUENT BRANCH TYPE: ${then_type}, ALTERNATIVE BRANCH TYPE: ${else_type}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
+        log(`CONSEQUENT BRANCH TYPE: ${unparse_type(then_type)}, ALTERNATIVE BRANCH TYPE: ${unparse_type(else_type)}`, "IF_EXPRESSION");
 
-        if (compare_type(then_type, else_type)) {
-            return then_type;
+        // Check that if both blocks evaluated to a Type either by Expression OR Return
+        // Then they must have the same type
+        // Else, allow one block to be UnitType
+        if (this.checkValidIfAndElseBlockTypes(then_type, else_type)) {
+            if (!(then_type instanceof UnitType) && !(else_type instanceof UnitType)) {
+                return then_type instanceof ReturnType ? then_type : new ReturnType(then_type)
+            }
+            return new UnitType()
         } else {
             print_error("Type error; Types of branches not matching; " +
                 "consequent type: " +
@@ -703,6 +708,38 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 "alternative type: " +
                 unparse_type(else_type))
         }
+    }
+
+    checkValidIfAndElseBlockTypes(then_type: Type, else_type: Type): boolean {
+        if (compare_type(then_type, else_type)) {
+            // True when both blocks' types evaluate by Expression OR Return
+            // and returns same type
+            // Or when both are UnitType
+            return true
+        }
+
+        // Case where if-block's type evaluates by Return
+        // and else-block's type evaluates by Expression
+        if (then_type instanceof ReturnType && 
+            !(else_type instanceof UnitType)) {
+            // compare returnedType with else_type
+            return compare_type(then_type.ReturnedType, else_type)
+        }
+
+        // Case where else-block's type evaluates by Return,
+        // and if-block's type evaluates by Expression
+        if (else_type instanceof ReturnType &&
+            !(then_type instanceof UnitType)) {
+            return compare_type(else_type.ReturnedType, then_type)
+        }
+
+        // Case where only one block evaluates to a Type
+        // either by Expression OR Return
+        // Return false if the block returns by Expression
+        // e.g. if (true) { 6 } else { 7; }
+        // Return true if the block returns by Return
+        // e.g. if (true) { return 6; } else { 7; }
+        return (then_type instanceof ReturnType) || (else_type instanceof ReturnType)
     }
 
     // KW_WHILE expression /*except structExpression*/ blockExpression
@@ -718,9 +755,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 unparse_type(pred_type))
         }
 
-        this.visit(ctx.blockExpression()); // typecheck the body
+        let body_type = this.visit(ctx.blockExpression()); // typecheck the body
 
-        return new UnitType() // while loops always have the unit type () in Rust
+        // while loops usually have the unit type () in Rust, unless a value is returned
+        return body_type instanceof ReturnType ? body_type : new UnitType() 
     }
 
     // LPAREN innerAttribute* expression RPAREN
@@ -868,7 +906,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (ctx.blockExpression() === null) {
             print_error("Function without body!")
         }
-        const body_type = this.visit(ctx.blockExpression())
+        let body_type = this.visit(ctx.blockExpression())
+        body_type = body_type instanceof ReturnType ? body_type.ReturnedType : body_type // unwrap return type
         log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
 
         te = restore_type_environment(te)
@@ -921,9 +960,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         // must typecheck expression too
-        this.visitChildren(ctx);
-
-        return new UnitType()
+        const expr_type: Type = this.visitChildren(ctx);
+        return expr_type instanceof ReturnType ? expr_type : new UnitType()
     }
 
     // letStatement
