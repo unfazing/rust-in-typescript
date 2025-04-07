@@ -332,6 +332,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return this.visitChildren(ctx)
     }
 
+    // ------------------------------ EXPRESSION ---------------------------------------------
+
     // leaf node: returns the type of literal value
     visitLiteralExpression(ctx: LiteralExpressionContext): Type {
         const type: ScalarTypeName = ctx.CHAR_LITERAL()
@@ -394,109 +396,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return expr_type.InnerType; // question: do we miss any info about the type mutability?
     }
 
-    // leaf node: returns the type declared in the declaration statement
-    visitType_(ctx: Type_Context): Type {
-        if (!ctx.typeNoBounds()) {
-            print_error("Unsupported type.");
-        }
-
-        return this.visitChildren(ctx);
-    }
-
-    visitTypeNoBounds(ctx: TypeNoBoundsContext): Type {
-        if (ctx.traitObjectTypeOneBound()) { // primitive type
-            return new ScalarType(this.visitChildren(ctx));
-        }
-
-        if (ctx.tupleType()) { // unit type "()"
-            return this.visit(ctx.tupleType())
-        }
-
-        if (ctx.referenceType()) { // reference
-            return this.visit(ctx.referenceType());
-        }
-
-        if (ctx.bareFunctionType()) { // function
-            return this.visit(ctx.bareFunctionType())
-        }
-
-        print_error("Unsupported type.");
-    };
-
-    // referenceType
-    // : AND lifetime? KW_MUT? typeNoBounds
-    visitReferenceType(ctx: ReferenceTypeContext): Type {
-        const is_mut: boolean = (ctx.KW_MUT() != null)
-        const inner_type: Type = this.visit(ctx.typeNoBounds());
-        log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
-
-        let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
-        return ref_type;
-    }
-
-    // forLifetimes? functionTypeQualifiers KW_FN LPAREN functionParametersMaybeNamedVariadic? RPAREN bareFunctionReturnType?    
-    visitBareFunctionType(ctx: BareFunctionTypeContext): Type {
-        const params_types: Type[] = ctx.functionParametersMaybeNamedVariadic() 
-            ? this.visit(ctx.functionParametersMaybeNamedVariadic()) 
-            : [];
-
-        const return_type: Type = ctx.bareFunctionReturnType() 
-            ? new UnitType() 
-            : this.visit(ctx.bareFunctionReturnType())
-
-        const closure: ClosureType = new ClosureType(params_types, return_type);
-
-        log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
-
-        return closure;
-    }
-
-    visitMaybeNamedFunctionParameters(ctx: MaybeNamedFunctionParametersContext): Type[] {
-        let result: Type[] = [];
-
-        for (let i = 0; i < ctx.maybeNamedParam().length; i++) {
-            const param_type: Type = this.visit(ctx.maybeNamedParam(i).type_());
-            result.push(param_type);
-        }
-
-        return result;
-    }
-
-    visitBareFunctionReturnType(ctx: BareFunctionReturnTypeContext): Type {
-        return this.visit(ctx.typeNoBounds())
-    }
-
-    visitFunctionParameters(ctx: FunctionParametersContext): Type[] {
-        let result: Type[] = [];
-
-        for (let i = 0; i < ctx.functionParam().length; i++) {
-            const param_type: Type = this.visit(ctx.functionParam(i).functionParamPattern().type_());
-            result.push(param_type);
-        }
-
-        return result;
-    }
-
-    visitFunctionReturnType(ctx: FunctionReturnTypeContext): Type {
-        if (!ctx.type_()) {
-            return new UnitType();
-        } else {
-            return this.visit(ctx.type_());
-        }
-    }
-
-    // tupleType
-    // : LPAREN ((type_ COMMA)+ type_?)? RPAREN
-    // ;
-    // Returns unit type "()". This is the equivalent of "undefined" in js.
-    visitTupleType(ctx: TupleTypeContext): UnitType {
-        if (ctx.type_().length == 0) {
-            return new UnitType();
-        } else {
-            print_error("Tuple type not supported.")
-        }
-    }
-
     // LPAREN innerAttribute* tupleElements? RPAREN
     visitTupleExpression(ctx: TupleExpressionContext): UnitType {
         if (ctx.tupleElements()) {
@@ -504,83 +403,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         return new UnitType();
-    }
-
-    // letStatement
-    // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
-    // ;
-    visitLetStatement(ctx: LetStatementContext): Type {
-        // Question: why look up type in environment when the type is declared?
-        // Not sure if scanning out into type environment works correctly now, would serve as a sanity check when we run
-        // Can directly access type when confident.
-        const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
-        const expected_type: Type = lookup_type(symbol, te);
-        const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
-        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
-
-        if (!compare_type(expected_type, actual_type)) {
-            print_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
-        }
-
-        // TODO: implement ownership transfer (move)
-
-        return new UnitType(); // statements produce undefined
-    }
-
-    // constantItem
-    // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
-    // ;
-    visitConstantItem(ctx: ConstantItemContext): Type {
-        const symbol: string = this.visit(ctx.identifier());
-        const expected_type: Type = lookup_type(symbol, te);
-        const actual_type: Type = this.visit(ctx.expression());
-        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
-
-
-        if (!compare_type(expected_type, actual_type)) {
-            print_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
-        }
-
-        return new UnitType() // statements produce undefined
-    }
-
-    // expression EQ expression
-    visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
-        const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
-        const actual_type: Type = this.visit(ctx.expression(1));
-        log(`EXPECTED_TYPE: ${expected_type}, ACTUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
-
-        if (!compare_type(expected_type, actual_type)) {
-            print_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
-        }
-
-        if (!expected_type.Mutable) {
-            print_error('Tried to assign when variable is immutable!')
-        }
-        // TODO: implement ownership transfer (move)
-
-        return new UnitType() // assigment/expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
-    }
-
-    // identifierPattern
-    // : KW_REF? KW_MUT? identifier (AT pattern)?
-    // ;
-    // 
-    // An identifierPattern is the name/symbol of a newly declared variable.
-    // 
-    // Return a tuple, where first element is 
-    // whether the variable is mutable and
-    // the second element is the variable name
-    visitIdentifierPattern(ctx: IdentifierPatternContext): [boolean, string] {
-        return [ctx.KW_MUT() != null, this.visit(ctx.identifier())]
-    }
-
-    // Return the string representation of the identifier
-    // the identifier is overloaded! It can either be:
-    // 1. the symbol of a variable (e.g. x)
-    // 2. the type of the variable (e.g. i32)
-    visitIdentifier(ctx: IdentifierContext): string {
-        return ctx.getText();
     }
 
     // blockExpression
@@ -678,47 +500,22 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return blockType;
     }
 
-    // function_
-    // : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
-    //     blockExpression
-    //     | SEMI
-    // )
-    // ;
-    visitFunction_(ctx: Function_Context): Type {
-        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType()
-        const param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : []
-        const param_names: string[] = []
-        let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null
-            ? 0
-            : ctx.functionParameters().functionParam().length
-        log(`ARITY: ${arity}`, "FUNCTION_")
-        for (let i = 0; i < arity; i++) {
-            param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern())) // enters identifier()
-        }
-        log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
+    // expression EQ expression
+    visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
+        const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
+        const actual_type: Type = this.visit(ctx.expression(1));
+        log(`EXPECTED_TYPE: ${expected_type}, ACTUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
 
-        te = extend_type_environment(param_names, param_types, te)
-        
-        if (ctx.blockExpression() === null) {
-            print_error("Function without body!")
-        }
-        const body_type = this.visit(ctx.blockExpression())
-        log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
-
-        te = restore_type_environment(te)
-
-        if (!compare_type(expected_return_type, body_type)) {
-            print_error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
+        if (!compare_type(expected_type, actual_type)) {
+            print_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
-        return new UnitType()
-    }
-
-    visitExpressionStatement(ctx: ExpressionStatementContext): Type {
-        if (ctx.expression() instanceof ReturnExpressionContext) {
-            return this.visit(ctx.expression())
+        if (!expected_type.Mutable) {
+            print_error('Tried to assign when variable is immutable!')
         }
-        return new UnitType()
+        // TODO: implement ownership transfer (move)
+
+        return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
     }
 
     // KW_RETURN expression?
@@ -923,6 +720,231 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         this.visit(ctx.blockExpression()); // typecheck the body
 
         return new UnitType() // while loops always have the unit type () in Rust
+    }
+
+    // ------------------------------ TYPE ---------------------------------------------
+
+    // leaf node: returns the type declared in the declaration statement
+    visitType_(ctx: Type_Context): Type {
+        if (!ctx.typeNoBounds()) {
+            print_error("Unsupported type.");
+        }
+
+        return this.visitChildren(ctx);
+    }
+
+    visitTypeNoBounds(ctx: TypeNoBoundsContext): Type {
+        if (ctx.traitObjectTypeOneBound()) { // primitive type
+            return new ScalarType(this.visitChildren(ctx));
+        }
+
+        if (ctx.tupleType()) { // unit type "()"
+            return this.visit(ctx.tupleType())
+        }
+
+        if (ctx.referenceType()) { // reference
+            return this.visit(ctx.referenceType());
+        }
+
+        if (ctx.bareFunctionType()) { // function
+            return this.visit(ctx.bareFunctionType())
+        }
+
+        print_error("Unsupported type.");
+    };
+
+    // referenceType
+    // : AND lifetime? KW_MUT? typeNoBounds
+    visitReferenceType(ctx: ReferenceTypeContext): Type {
+        const is_mut: boolean = (ctx.KW_MUT() != null)
+        const inner_type: Type = this.visit(ctx.typeNoBounds());
+        log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
+
+        let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
+        return ref_type;
+    }
+
+    // forLifetimes? functionTypeQualifiers KW_FN LPAREN functionParametersMaybeNamedVariadic? RPAREN bareFunctionReturnType?    
+    visitBareFunctionType(ctx: BareFunctionTypeContext): Type {
+        const paramTypes: Type[] = ctx.functionParametersMaybeNamedVariadic() 
+            ? this.visit(ctx.functionParametersMaybeNamedVariadic()) 
+            : [];
+
+        const returnType: Type = ctx.bareFunctionReturnType() 
+            ? new UnitType() 
+            : this.visit(ctx.bareFunctionReturnType())
+
+        const closure: ClosureType = new ClosureType(paramTypes, returnType);
+
+        log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
+
+        return closure;
+    }
+
+    // maybeNamedFunctionParameters: maybeNamedParam (COMMA maybeNamedParam)* COMMA?
+    // maybeNamedParam: outerAttribute* ((identifier | UNDERSCORE) COLON)? type_
+    // 
+    visitMaybeNamedFunctionParameters(ctx: MaybeNamedFunctionParametersContext): Type[] {
+        let result: Type[] = [];
+
+        for (let i = 0; i < ctx.maybeNamedParam().length; i++) {
+            const param_type: Type = this.visit(ctx.maybeNamedParam(i).type_());
+            result.push(param_type);
+        }
+
+        return result;
+    }
+
+    visitBareFunctionReturnType(ctx: BareFunctionReturnTypeContext): Type {
+        return this.visit(ctx.typeNoBounds())
+    }
+
+    // tupleType
+    // : LPAREN ((type_ COMMA)+ type_?)? RPAREN
+    // ;
+    // Returns unit type "()". This is the equivalent of "undefined" in js.
+    visitTupleType(ctx: TupleTypeContext): UnitType {
+        if (ctx.type_().length == 0) {
+            return new UnitType();
+        } else {
+            print_error("Tuple type not supported.")
+        }
+    }
+
+    // ------------------------------ FUNCTION ---------------------------------------------
+
+    // function_
+    // : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
+    //     blockExpression
+    //     | SEMI
+    // )
+    // ;
+    visitFunction_(ctx: Function_Context): Type {
+        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType()
+        const param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : []
+        const param_names: string[] = []
+        let arity = ctx.functionParameters() == null || ctx.functionParameters().functionParam() == null
+            ? 0
+            : ctx.functionParameters().functionParam().length
+        log(`ARITY: ${arity}`, "FUNCTION_")
+        for (let i = 0; i < arity; i++) {
+            param_names.push(this.visit(ctx.functionParameters().functionParam(i).functionParamPattern().pattern())) // enters identifier()
+        }
+        log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
+
+        te = extend_type_environment(param_names, param_types, te)
+        
+        if (ctx.blockExpression() === null) {
+            print_error("Function without body!")
+        }
+        const body_type = this.visit(ctx.blockExpression())
+        log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
+
+        te = restore_type_environment(te)
+
+        if (!compare_type(expected_return_type, body_type)) {
+            print_error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
+        }
+
+        return new UnitType()
+    }
+
+    // (selfParam COMMA)? functionParam (COMMA functionParam)* COMMA?
+    visitFunctionParameters(ctx: FunctionParametersContext): Type[] {
+        let result: Type[] = [];
+
+        for (let i = 0; i < ctx.functionParam().length; i++) {
+            const param_type: Type = this.visit(ctx.functionParam(i));
+            result.push(param_type);
+        }
+
+        return result;
+    }
+
+    // functionParam: outerAttribute* (functionParamPattern | DOTDOTDOT | type_)
+    // functionParamPattern: pattern COLON (type_ | DOTDOTDOT)
+    visitFunctionParam(ctx: FunctionParamContext): Type {
+        if (!ctx.functionParamPattern() || !ctx.functionParamPattern().type_()) {
+            print_error("Function parameter must have parameter name and type.");
+            return
+        }
+
+        return this.visit(ctx.functionParamPattern().type_());
+    }
+
+    // RARROW type_
+    visitFunctionReturnType(ctx: FunctionReturnTypeContext): Type {        
+        return this.visit(ctx.type_());
+    }
+
+    // ------------------------------ STATEMENTS ---------------------------------------------
+
+    visitExpressionStatement(ctx: ExpressionStatementContext): Type {
+        if (ctx.expression() instanceof ReturnExpressionContext) {
+            return this.visit(ctx.expression())
+        }
+        return new UnitType()
+    }
+
+    // letStatement
+    // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
+    // ;
+    visitLetStatement(ctx: LetStatementContext): Type {
+        // Question: why look up type in environment when the type is declared?
+        // Not sure if scanning out into type environment works correctly now, would serve as a sanity check when we run
+        // Can directly access type when confident.
+        const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
+        const expected_type: Type = lookup_type(symbol, te);
+        const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression or a callExpression
+        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
+
+        if (!compare_type(expected_type, actual_type)) {
+            print_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
+        }
+
+        // TODO: implement ownership transfer (move)
+
+        return new UnitType(); // statements produce undefined
+    }
+
+    // constantItem
+    // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
+    // ;
+    visitConstantItem(ctx: ConstantItemContext): Type {
+        const symbol: string = this.visit(ctx.identifier());
+        const expected_type: Type = lookup_type(symbol, te);
+        const actual_type: Type = this.visit(ctx.expression());
+        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
+
+
+        if (!compare_type(expected_type, actual_type)) {
+            print_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
+        }
+
+        return new UnitType() // statements produce undefined
+    }
+
+    // ------------------------------ IDENTIFIER ---------------------------------------------
+
+    // identifierPattern
+    // : KW_REF? KW_MUT? identifier (AT pattern)?
+    // ;
+    // 
+    // An identifierPattern is the name/symbol of a newly declared variable.
+    // 
+    // Return a tuple, where first element is 
+    // whether the variable is mutable and
+    // the second element is the variable name
+    visitIdentifierPattern(ctx: IdentifierPatternContext): [boolean, string] {
+        return [ctx.KW_MUT() != null, this.visit(ctx.identifier())]
+    }
+
+    // Return the string representation of the identifier
+    // the identifier is overloaded! It can either be:
+    // 1. the symbol of a variable (e.g. x)
+    // 2. the type of the variable (e.g. i32)
+    visitIdentifier(ctx: IdentifierContext): string {
+        return ctx.getText();
     }
     
     // Override the default result method from AbstractParseTreeVisitor
