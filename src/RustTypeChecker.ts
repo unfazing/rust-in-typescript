@@ -624,7 +624,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
         if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
-            return new ScalarType(t1.TypeName)
+            return new ScalarType("bool")
         } else {
             print_error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
         }
@@ -898,10 +898,19 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // ------------------------------ STATEMENTS ---------------------------------------------
 
+    // expressionStatement
+    // : expression SEMI
+    // | expressionWithBlock SEMI?
+    // ;
+    //
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
         if (ctx.expression() instanceof ReturnExpressionContext) {
             return this.visit(ctx.expression())
         }
+
+        // must typecheck expression too
+        this.visitChildren(ctx);
+
         return new UnitType()
     }
 
