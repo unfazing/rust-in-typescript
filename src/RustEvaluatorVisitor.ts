@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { compile_time_environment_extend, compile_time_environment_position, global_compile_environment } from './RustCompileTimeEnv.js';
+import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './RustCompileTimeEnv.js';
 import { error } from 'console';
 import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType } from './Utils.js';
 // wc: write counter
@@ -447,8 +447,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         })
 
         log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
+        
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length };
         ce = compile_time_environment_extend(locals, ce)
+
         let first = true;
         statements.forEach(stmt => {
             if (first) {
@@ -460,7 +462,9 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             log(`Visiting child statement ${stmt.getText()}`, "BLOCK_EXPRESSION")
             this.visit(stmt)
         })
+
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
+        ce = compile_time_environment_restore(ce);
     }
 
     // function_
@@ -493,7 +497,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
         log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
         ce = compile_time_environment_extend(param_list, ce)
-        this.visit(body_ctx)
+
+        // compile body into instructions
+        this.visit(body_ctx) // the environment will be extended and restored once more => done twice
+        
+        ce = compile_time_environment_restore(ce);
         instrs[wc++] = { tag: "LDC", val: undefined}
         instrs[wc++] = { tag: "RESET" }
         goto_instruction.addr = wc

@@ -11,6 +11,11 @@ const push = (array, ...items) => {
 	return array;
 };
 
+const pop = (array) => {
+	array.pop();
+	return array;
+}
+
 // return the last element of given array
 // without changing the array
 const peek = (array, address) => array.slice(-1 - address)[0];
@@ -111,8 +116,15 @@ for (const key in constants) primitive_object[key] = constants[key];
 
 export const compile_time_environment_extend = (vs, e) => {
 	//  make shallow copy of e
-	return push([...e], vs);
+	// return push([...e], vs);
+	e.push(vs);
+	return e;
 };
+
+export const compile_time_environment_restore = (e) => {
+	e.pop();
+	return e;
+}
 
 // compile-time frames only need symbols (keys), no values
 const global_compile_frame = Object.keys(primitive_object);
