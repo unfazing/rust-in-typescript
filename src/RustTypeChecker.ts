@@ -481,12 +481,21 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // : LPAREN ((type_ COMMA)+ type_?)? RPAREN
     // ;
     // Returns unit type "()". This is the equivalent of "undefined" in js.
-    visitTupleType(ctx: TupleTypeContext): Type {
+    visitTupleType(ctx: TupleTypeContext): UnitType {
         if (ctx.type_().length == 0) {
             return new UnitType();
         } else {
             print_error("Tuple type not supported.")
         }
+    }
+
+    // LPAREN innerAttribute* tupleElements? RPAREN
+    visitTupleExpression(ctx: TupleExpressionContext): UnitType {
+        if (ctx.tupleElements()) {
+            print_error("Tuple expression not supported");
+        }
+
+        return new UnitType();
     }
 
     // letStatement
