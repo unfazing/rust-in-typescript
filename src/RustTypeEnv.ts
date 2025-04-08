@@ -27,24 +27,133 @@ export const pop = (array) => {
 export const peek = (array, address) => array.slice(-1 - address)[0];
 
 
+export class TypeEnvironment {
+    type_environment: TypeFrame[]
+    private global_type_frame: TypeFrame
+    constructor() {
+        this.type_environment = empty_type_environment
+        this.global_type_frame = new GlobalTypeFrame()
+    }
+
+    // push new frames to the type environment
+    private push(...frames: TypeFrame[]) {
+        for (let frame of frames) {
+            this.type_environment.push(frame)
+        }
+    }
+    
+    // pop the last frame from the type environment
+    private pop() {
+        this.type_environment.pop()
+    }
+
+    // get the last frame from the type environment
+    peek() {
+        return this.type_environment[this.type_environment.length - 1]
+    }
+
+    // TODO: Currently not implemented in checker -> to use when trying to move ownership by assignment
+    // let x = y; ---> look up for y can only be done up to nearest function frame.
+    lookup_var_type = (x: string) => {
+        // Only look up to the nearest function frame. Not allowed to access variables outside of nearest function scope.
+        for (let i = this.type_environment.length - 1; i >= 0; i--) { 
+            if (this.type_environment[i].frame.hasOwnProperty(x) ) {
+                return this.type_environment[i].frame[x]
+            }
+            if (this.type_environment[i] instanceof FunctionTypeFrame) {
+                break; // stop searching once encountered nearest function frame
+            }
+        }
+
+        // If not found, check the global type environment
+        if (this.global_type_frame.frame.hasOwnProperty(x)) {
+            return this.global_type_frame.frame[x]
+        }
+        print_error("[lookup_type] Unbound name: " + x)
+    }
+
+    // lookup all environment frames, starting from the most recent
+    lookup_type = (x: string) => {
+        for (let i = this.type_environment.length - 1; i >= 0; i--) { 
+            if (this.type_environment[i].frame.hasOwnProperty(x) ) {
+                return this.type_environment[i].frame[x]
+            }
+        }
+
+        // If not found, check the global type environment
+        if (this.global_type_frame.frame.hasOwnProperty(x)) {
+            return this.global_type_frame.frame[x]
+        }
+        print_error("[lookup_type] Unbound name: " + x)
+    }
+
+    // extend the environment destructively 
+    extend_type_environment = (xs: string[], ts: Type[], is_blocktypeframe: boolean) => {
+        if (ts.length > xs.length) 
+            print_error('too few parameters in function declaration')
+        if (ts.length < xs.length) 
+            print_error('too many parameters in function declaration')
+
+        const new_frame: TypeFrame = is_blocktypeframe 
+                                        ? new BlockTypeFrame()
+                                        : new FunctionTypeFrame()
+        for (let i = 0; i < xs.length; i++) 
+            new_frame.add_variable(xs[i], ts[i])
+        this.push(new_frame)
+    }
+
+    // pop the last (most recent) frame
+    restore_type_environment() {
+        this.pop() 
+    }
+}
+
+
+export abstract class TypeFrame {
+    frame: {[key:string]: Type}
+    constructor() {
+        this.frame = {}
+    }
+
+    // add a new variable to the frame
+    add_variable = (x: string, t: Type) => {
+        if (this.frame.hasOwnProperty(x)) {
+            print_error(`[add_variable] Variable ${x} already exists in the frame`)
+        }
+        this.frame[x] = t
+    }
+}
+
+export class GlobalTypeFrame extends TypeFrame {
+    constructor() {
+        super()
+        // TODO: add global constants/builtins here
+    }
+}
+
+export class FunctionTypeFrame extends TypeFrame {
+    constructor() {
+        super()
+    }
+}
+
+export class BlockTypeFrame extends TypeFrame {
+    constructor() {
+        super()
+    }
+}
+
+
+
 // Type frames are JavaScript objects that map 
 // symbols (strings) to types.
 
 // Type environment is a stack implemented with array 
 const empty_type_environment = []
-export const global_type_environment: {[key:string]: Type}[] = empty_type_environment
-
-export const lookup_type = (x: string, e: {[key:string]: Type}[]) => {
-    for (let i = e.length - 1; i >= 0; i--) { // TODO: currently O(N). Perhaps use compile environment implementation to reduce to O(1)
-        if (e[i].hasOwnProperty(x) ) {
-            return e[i][x]
-        }
-    }
-    print_error("[lookup_type] Unbound name: " + x)
-}
+export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType"
+export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" | "moved"
 
 // Type is a class
 // TypeName is a string. 
@@ -55,6 +164,16 @@ export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "return
 export abstract class Type {
     Mutable: boolean
     TypeName: TypeName
+}
+
+// NOT A REAL TYPE - used to indicate that a variable has been moved
+export class MovedType extends Type {
+    OriginalType: Type
+    constructor(originalType: Type) {
+        super()
+        this.TypeName = "moved"
+        this.OriginalType = originalType
+    }
 }
 
 export class ScalarType extends Type {
@@ -116,27 +235,6 @@ export class ReturnType extends Type {
         this.Mutable = is_mut
         this.TypeName = "returnType"
     }  
-}
-
-// extend the environment destructively 
-export const extend_type_environment = (xs: string[], ts: Type[], e: {[key:string]: Type}[]) => {
-    if (ts.length > xs.length) 
-        print_error('too few parameters in function declaration')
-    if (ts.length < xs.length) 
-        print_error('too many parameters in function declaration')
-
-    const new_frame = {}
-    for (let i = 0; i < xs.length; i++) 
-        new_frame[xs[i]] = ts[i]
-
-    e.push(new_frame)
-    return e;
-}
-
-// extend the environment destructively 
-export const restore_type_environment = (e: {[key:string]: Type}[]): {[key:string]: Type}[] => {
-    e.pop(); // pop the last (most recent) frame
-    return e;
 }
 
 export const compare_type = (t1: Type, t2: Type): boolean => {

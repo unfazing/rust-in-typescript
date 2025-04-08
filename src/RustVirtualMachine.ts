@@ -315,7 +315,7 @@ const is_Closure = (address) => heap_get_tag(address) === Closure_tag;
 // block frame
 // [1 byte tag, 4 bytes unused,
 //  2 bytes #children, 1 byte unused]
-
+// followed by the address of env
 const heap_allocate_Blockframe = (env) => {
 	const address = heap_allocate(Blockframe_tag, 2);
 	heap_set(address + 1, env);

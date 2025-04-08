@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, extend_type_environment, global_type_environment, ImmutableRefType, lookup_type, MutableRefType, peek, pop, push, RefType, restore_type_environment, ReturnType, ScalarType, ScalarTypeName, Type, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -273,23 +273,67 @@ function log(message: any, enclosing_function: string): void {
 
 }
 
-let te: {[key:string]: Type}[] = global_type_environment // an array of frame objects that map symbol to type
+// SIMPLE IMPLEMENTATION OF TYPE CHECKING OWNERSHIP 
+// - without considering existence of structs/loops/nested data structures
+
+// --- OWNERSHIP ---
+// A variable is owned by the scope it is declared in.
+// Nested inner scopes can borrow or move variables owned by outer scope.
+
+// -- FREEING --
+// After a scope ends, everything owned by the scope is freed.
+
+// Type Environment
+// A scope is represented by a frame object in the type environment.
+// The type environment is extended on visitCrate, visitFunction_ and visitBlockExpression 
+// upon scanning out the local declarations.
+// The type environment is restored upon returning from the above functions.
+// Lookup of a variable's type is done from inner most type frame to outermost.
+// In a single scope, there cannot be reassignment of a variable to a different type.
+
+// --- MOVING OWNERSHIP ---
+// CASE 1: Assignment.
+// E.g. let x: i32 = 3; let y = x;
+// Note: we cannot move ownership of an outer variable inside a function body block. e.g. let x: i32 = 3; fn f() {let y = x};
+// ---> "error[E0434]: can't capture dynamic environment in a fn item"
+// Thus lookup of a declared variable can only be up till the nearest function frame and the global frame.
+
+// Up to 2 type frames might need to be manipulated - the frames where x and y are declared may be different.
+// The case where x and y are declared in nested block scope (could be if or while scope also), let x: i32 = 3; {let y = x;}
+// The variable that is assigned as x (ie. y) will have the same type as x.
+// The variable moved (ie. x) will be marked as no longer owned in the outer scope's type frame by being set to MovedType. 
+// Using the moved variable will throw an error. ---> "error[E0382]: borrow of moved value: `x`"
+// However, reassigning the moved variable is allowed if the new assignment follows the original type of the variable
+// e.g. fn main() {
+//          let mut x: String = String::from("1");
+//          if true {
+//              let y = x;
+//          }
+//          x = String::from("2");
+//      }
+
+// CASE 2: Passing Arguments to Function call.
+// E.g. let x: i32 = 3; let y = f(x);
+// The variable passed into the function will be marked as no longer owned in the outer scope's type frame.
+// Calling a function does not extend the type environment. Type checking for the function body is done during declaration.
+
+// Case 3: Assigning a variable to Returned value of Function Call. 
+// E.g. let y = f();
+// No real change is required to the type environment in this case.
+// The variable that is assigned will have the same type as the return type of f().
+
+
+let te: TypeEnvironment = global_type_environment // an array of frame objects that map symbol to type
 let returnTypeStack: Type[] = [] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
+const IS_BLOCKTYPEFRAME = true
+const IS_FUNCTIONTYPEFRAME = false
+
 
 // Notes:
 // Usually, visiting all the way to leaf nodes returns Type object (Tyoe defined in RustTypeEnv.ts)
 // The only leaf node that returns string is 'Identifier'
 // The 'IdentifierPattern' node will return a [boolean, string] tuple, representing is_mut and symbol name.
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
-    
-    // visitTerminal(_node: TerminalNode): any {
-    //     const tokenText: string = _node.getText()
-    //     switch (tokenText) {
-    //         case ";":
-    //             return unitType // all statements end with ';'. They are undefined (other than return statements)
-    //     }
-    // }
-
     // entry node
     visitCrate(ctx: CrateContext): Type {
         let locals: string[] = []
@@ -328,7 +372,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 }
             }
         });
-        te = extend_type_environment(locals, typelist, te)
+        te.extend_type_environment(locals, typelist, IS_BLOCKTYPEFRAME)
         log(`TYPE ENVIRONMENT: ${JSON.stringify(te)}`, "CRATE")
         return this.visitChildren(ctx)
     }
@@ -357,8 +401,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // leaf node: returns the type of the symbol (by looking up type env)
     visitPathExpression(ctx: PathExpressionContext): Type {
+        // TODO: Might not want to do the lookup here. Instead, allow parent nodes to decide 
+        // how far to lookup type env (up to nearest func frame or all the way)
         const symbol = this.visitChildren(ctx)
-        const type: Type = lookup_type(symbol, te)
+        const type: Type = te.lookup_type(symbol)
         log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
@@ -473,7 +519,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
         }
 
-        te = extend_type_environment(syms, types, te);
+        te.extend_type_environment(syms, types, IS_BLOCKTYPEFRAME);
 
         // type check each statement in the block.
         // the type of the block is the type of the LAST statement/expression in the block.
@@ -495,15 +541,21 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         log(`FINAL EVALUATED BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
 
-        te = restore_type_environment(te);
+        te.restore_type_environment();
 
         return blockType;
     }
 
     // expression EQ expression
+    // Snippet that Rust allows but we don't:     
+    // fn f()-> i32 { let z = return 7;} // encounter mismatch types in assignment
     visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
         const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
-        const actual_type: Type = this.visit(ctx.expression(1));
+        let actual_type: Type = this.visit(ctx.expression(1));
+
+        if (ctx.expression(1) instanceof CallExpressionContext) {
+            actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
+        }
 
         log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
 
@@ -540,7 +592,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // expression LPAREN callParams? RPAREN
     visitCallExpression(ctx: CallExpressionContext): Type {
-        const expected_type: Type = this.visit(ctx.expression())
+        const expected_type: Type = this.visit(ctx.expression()) // lookup type in pathExpression node
         log(`EXPECTED CLOSURE TYPE: ${unparse_type(expected_type)}`, "CALL_EXPRESSION");
         if (!(expected_type instanceof ClosureType)) {
             print_error("Type error in application; function application must have function type.")
@@ -670,7 +722,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     //
     // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
     // Our implementation is STRICTER than rust's: require all branching blocks to evaluate to the exact same types 
-    // (i.e. the branching blocks are all UnitType, all ReturnType, or all same Type (as evaluated by last expression in block))
+    // All if expressions must have both if-else block, if there are else-if blocks, they also must have the same type.
+    // i.e. the branching blocks are all UnitType, all ReturnType, or all same Type (as evaluated by last expression in block)
     // An implication is that during letStatement or Assignment, ifExpression evaluates to ReturnType, then we throw type error where Rust wouldn't
     visitIfExpression(ctx: IfExpressionContext): Type {
         const predicate: ExpressionContext = ctx.expression();
@@ -838,12 +891,15 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     //     | SEMI
     // )
     // ;
+
+    // TODO: if function takes in more than 1 reference as arguments, and returns a reference
+    // show warning that lifetime of resulting reference is not guaranteed to be valid
     visitFunction_(ctx: Function_Context): Type {
 
         // look up function name (symbol) from type environment instead 
         // for sanity check + prevent accessing null property
         const symbol: string = this.visit(ctx.identifier());
-        const fun_type: Type = lookup_type(symbol, te); 
+        const fun_type: Type = te.lookup_type(symbol); 
 
         if (!(fun_type instanceof ClosureType)) {
             print_error("Function type must be of closure type.");
@@ -872,7 +928,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
         log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
-        te = extend_type_environment(param_names, param_types, te)
+        te.extend_type_environment(param_names, param_types, IS_FUNCTIONTYPEFRAME)
         
         if (ctx.blockExpression() === null) {
             print_error("Function without body!")
@@ -881,7 +937,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         body_type = body_type instanceof ReturnType ? body_type.ReturnedType : body_type // unwrap return type
         log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
 
-        te = restore_type_environment(te)
+        te.restore_type_environment()
 
         if (!compare_type(expected_return_type, body_type)) {
             print_error(`Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`)
@@ -930,14 +986,20 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // ReturnType -> [expression SEMI] when the expression is a return statement, 
     //            or [expressionWithBlock SEMI?] when expressionWithBlock evaluates to a ReturnType
     // UnitType -> [expression SEMI] when the expression is not a return statement
+    // Any Type -> [expressionWithBlock SEMI?] when expressionWithBlock evaluates to a non-ReturnType
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
-        if (ctx.expression() instanceof ReturnExpressionContext) {
-            return this.visit(ctx.expression())
+        log(`TEXT: ${ctx.getText()}`, "EXPRESSION_STATEMENT");
+        if (ctx.expressionWithBlock()) {
+            const expr_type: Type = this.visit(ctx.expressionWithBlock());
+            log(`FOUND EXPRESSIONWITHBLOCK: ${ctx.expressionWithBlock().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
+            return expr_type
         }
 
-        // must typecheck expression too
-        const expr_type: Type = this.visitChildren(ctx);
-        return expr_type instanceof ReturnType ? expr_type : new UnitType()
+        if (ctx.expression()) {
+            const expr_type: Type = this.visit(ctx.expression());
+            log(`FOUND EXPRESSION SEMI: ${ctx.expression().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
+            return expr_type instanceof ReturnType ? expr_type : new UnitType()
+        }
     }
 
     // letStatement
@@ -948,9 +1010,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // Not sure if scanning out into type environment works correctly now, would serve as a sanity check when we run
         // Can directly access type when confident.
         const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
-        const expected_type: Type = lookup_type(symbol, te);
-        const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression 
+        const expected_type: Type = te.lookup_type(symbol);
+        let actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression 
         
+        if (ctx.expression() instanceof CallExpressionContext) {
+            actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
+        }
+
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
         if (!compare_type(expected_type, actual_type)) {
@@ -967,7 +1033,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // ;
     visitConstantItem(ctx: ConstantItemContext): Type {
         const symbol: string = this.visit(ctx.identifier());
-        const expected_type: Type = lookup_type(symbol, te);
+        const expected_type: Type = te.lookup_type(symbol);
         const actual_type: Type = this.visit(ctx.expression());
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
 

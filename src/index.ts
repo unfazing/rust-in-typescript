@@ -41,16 +41,129 @@ import { RustTypeChecker } from './RustTypeChecker.js';
 
 const chunk = `
 fn main() {
-    const TEST_CONST: i32 = 1;
-    let mut test_mut_let: i32 = 2;
-    fn test_closure(p1: i32, p2: i32) {
-        const FILLER: i32 = 11;
-        // return 3;
-    }
-    test_mut_let = test_mut_let + 6;
-    test_closure(4, 5);
+    // fn pass1() -> i32 {
+    //     if (true) {
+    //         6
+    //     } else {
+    //         7
+    //     }
+    // }
 
-    // let mut x : i32 = 0;
+    // fn pass2() -> i32 {
+    //     if (true) {
+    //         6;
+    //     } else {
+    //         7;
+    //     }
+    //     return 1;
+    // }
+
+    fn pass3() -> i32 {
+        if (true) {
+            return 6;
+        } else {
+            return 7;
+        }
+    }
+
+    fn pass3_1() -> i32 {
+        let mut x: i32 = pass3();
+        x = pass3() + 1;
+        x = pass3() + pass3() + x;
+        let mut y: i32 = pass3() + pass3();
+        y = y + x;
+        return y;
+    }
+
+    // fn pass4() -> i32 {
+    //     fn f8() -> bool {
+    //         return false;
+    //     }
+    //     if (true) {
+    //         if (true) {
+    //             return 4;
+    //         } else {
+    //             return 5;
+    //         }
+    //     } else if (true) {
+    //         return 6;
+    //     } else {
+    //         return 7;
+    //     }
+    //     return 111111;
+    // }
+    
+
+    // fn pass5() -> i32 {
+    //     let mut x: i32 = if (true) { 6 } else { 7 };
+    //     return x;
+    // }
+
+
+    // SHOULD ERROR
+    // fn fail1() -> i32 {
+    //     if (true) {
+    //         return 6;
+    //     } else {
+    //         7
+    //     }
+    // }
+
+    // SHOULD ERROR
+    // fn fail2() -> i32 {
+    //     if (true) {
+    //         6;
+    //     } else {
+    //         return 7;
+    //     }
+    //     return 1;
+    // }
+
+    // SHOULD ERROR
+    // fn fail3() -> i32 {
+    //     if (true) {
+    //         return false;
+    //     } else {
+    //         return 7;
+    //     }
+    //     return 1;
+    // }
+
+    // SHOULD ERROR
+    // fn fail4() -> i32 {
+    //     if (true) {
+    //         return false
+    //     } else {
+    //         7;
+    //     }
+    //     return 1;
+    // }
+
+    // SHOULD ERROR
+    // fn fail5() -> i32 {
+    //     let mut y: i32 = return 6;
+    // }
+    
+
+    // const TEST_CONST: i32 = 1;
+    // let mut test_mut_let: i32 = 2;
+    // fn test_closure(p1: i32, p2: i32)-> i32 {
+    //     const FILLER: i32 = 11;
+    //     4
+    //     // return 4.23;
+    // }
+    // test_mut_let = test_mut_let + 6.123;
+    // let test_wrong: f64 = test_closure(4, 5);
+    // let mut x: i32 = 123;
+    // let mut x2: i32 = 123123;
+
+    // let mut y : &mut i32 = &mut x;
+    // *y = 234;
+    //     y = &mut x2;
+
+
+    // let mut z: & &i32 = &y;
+    // y = &x2
     // while (x < 5) {
     //     x = x + 1;
     // }
