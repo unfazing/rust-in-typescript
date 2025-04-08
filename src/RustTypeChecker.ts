@@ -503,20 +503,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): Type {
         const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
-        let actual_type: Type = this.visit(ctx.expression(1));
+        const actual_type: Type = this.visit(ctx.expression(1));
 
-        // When IfExpression is used as Ternary, current behaviour is that the resulting type will be wrapped in a ReturnType
-        // e.g. x = if (true) { 6 } else { 7 };
-        if (actual_type instanceof ReturnType) {
-            if (!(ctx.expression(1) instanceof ExpressionWithBlock_Context)) {
-                print_error(`Type error in assignment expr; expression was wrapped in ReturnType (${unparse_type(actual_type)})` + 
-                ` as if it was returned by a Ternary, but the expression was not a Ternary.`);
-            }
-            log(`TERNARY FOUND IN ASSIGNMENT: ${ctx.expression(1).getText()}`, "ASSIGNMENT_EXPRESSION");
-            actual_type = actual_type.ReturnedType
-        }
-        
-        log(`EXPECTED_TYPE: ${expected_type}, ACTUAL TYPE: ${actual_type}`, "ASSIGNMENT_EXPRESSION");
+        log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
 
         if (!compare_type(expected_type, actual_type)) {
             print_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
@@ -680,6 +669,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // let mut x = if true { 42; }; => ALLOWED, undefined === undefined .
     //
     // KW_IF expression blockExpression (KW_ELSE (blockExpression | ifExpression | ifLetExpression))?
+    // Our implementation is STRICTER than rust's: require all branching blocks to evaluate to the exact same types 
+    // (i.e. the branching blocks are all UnitType, all ReturnType, or all same Type (as evaluated by last expression in block))
+    // An implication is that during letStatement or Assignment, ifExpression evaluates to ReturnType, then we throw type error where Rust wouldn't
     visitIfExpression(ctx: IfExpressionContext): Type {
         const predicate: ExpressionContext = ctx.expression();
         const pred_type: Type = this.visit(predicate);
@@ -709,22 +701,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         log(`CONSEQUENT BRANCH TYPE: ${unparse_type(then_type)}, ALTERNATIVE BRANCH TYPE: ${unparse_type(else_type)}`, "IF_EXPRESSION");
 
-        // Check that if both blocks evaluated to a Type either by Expression OR Return
-        // Then they must have the same type
-        // Else, allow one block to be UnitType
-        if (this.checkValidIfAndElseBlockTypes(then_type, else_type)) {
-            if (!(then_type instanceof UnitType) && !(else_type instanceof UnitType)) {
-                // Case both blocks evaluated to a Type. 
-                // if (!(then_type instanceof ReturnType) && !(else_type instanceof ReturnType)) {
-                //     // Case where both blocks evaluated to a Type by Expression, returns the Expression's type
-                //     return then_type
-                // } else {
-                //     // Case where at least one block evaluated to a Type by Return, returns a ReturnType
-                    return then_type instanceof ReturnType ? then_type : new ReturnType(then_type)
-                // }
-            }
-
-            return new UnitType()
+        if (compare_type(then_type, else_type)) {
+            return then_type;
         } else {
             print_error("Type error; Types of branches not matching; " +
                 "consequent type: " +
@@ -732,38 +710,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 "alternative type: " +
                 unparse_type(else_type))
         }
-    }
-
-    checkValidIfAndElseBlockTypes(then_type: Type, else_type: Type): boolean {
-        if (compare_type(then_type, else_type)) {
-            // True when both blocks' types evaluate by Expression OR Return
-            // and returns same type
-            // Or when both are UnitType
-            return true
-        }
-
-        // Case where if-block's type evaluates by Return
-        // and else-block's type evaluates by Expression
-        if (then_type instanceof ReturnType && 
-            !(else_type instanceof UnitType)) {
-            // compare returnedType with else_type
-            return compare_type(then_type.ReturnedType, else_type)
-        }
-
-        // Case where else-block's type evaluates by Return,
-        // and if-block's type evaluates by Expression
-        if (else_type instanceof ReturnType &&
-            !(then_type instanceof UnitType)) {
-            return compare_type(else_type.ReturnedType, then_type)
-        }
-
-        // Case where only one block evaluates to a Type
-        // either by Expression OR Return
-        // Return false if the block returns by Expression
-        // e.g. if (true) { 6 } else { 7; }
-        // Return true if the block returns by Return
-        // e.g. if (true) { return 6; } else { 7; }
-        return (then_type instanceof ReturnType) || (else_type instanceof ReturnType)
     }
 
     // KW_WHILE expression /*except structExpression*/ blockExpression
@@ -981,9 +927,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // | expressionWithBlock SEMI?
     // ;
     // Expression Statement evaluates into
-    // UnitType -> when the expression is a statement
-    // ReturnType -> when the expression is a return statement
-    // Any Type -> when the expression is a ternary operator
+    // ReturnType -> [expression SEMI] when the expression is a return statement, 
+    //            or [expressionWithBlock SEMI?] when expressionWithBlock evaluates to a ReturnType
+    // UnitType -> [expression SEMI] when the expression is not a return statement
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
         if (ctx.expression() instanceof ReturnExpressionContext) {
             return this.visit(ctx.expression())
@@ -1003,18 +949,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // Can directly access type when confident.
         const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         const expected_type: Type = lookup_type(symbol, te);
-        let actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression (ternary)
-        
-        // When IfExpression is used as Ternary, current behaviour is that the resulting type will be wrapped in a ReturnType
-        // e.g. let mut x: i32 = if (true) { 6 } else { 7 };
-        if (actual_type instanceof ReturnType) {
-            if (!(ctx.expression() instanceof ExpressionWithBlock_Context)) {
-                print_error(`Type error in let statement; expression was wrapped in ReturnType (${unparse_type(actual_type)})` + 
-                ` as if it was returned by a Ternary, but the expression was not a Ternary.`);
-            }
-            log(`TERNARY FOUND IN LET STATEMENT: ${ctx.expression().getText()}`, "LET_STATEMENT");
-            actual_type = actual_type.ReturnedType
-        }
+        const actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression 
         
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
