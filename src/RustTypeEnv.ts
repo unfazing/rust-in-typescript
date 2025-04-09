@@ -2,6 +2,7 @@
  * type environments
  * *****************/
 
+import { assert } from "console";
 import { print_error } from "./Utils.js"
 
 /* **********************
@@ -52,31 +53,38 @@ export class TypeEnvironment {
         return this.type_environment[this.type_environment.length - 1]
     }
 
-    // TODO: Currently not implemented in checker -> to use when trying to move ownership by assignment
-    // let x = y; ---> look up for y can only be done up to nearest function frame.
-    lookup_var_type = (x: string) => {
-        // Only look up to the nearest function frame. Not allowed to access variables outside of nearest function scope.
+    mark_moved(x: string) {
         for (let i = this.type_environment.length - 1; i >= 0; i--) { 
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
-                return this.type_environment[i].frame[x]
+                assert(!(this.type_environment[i].frame[x] instanceof MovedType), `ASSERT FAILED: Trying to move a moved value: ${x}`)
+                this.type_environment[i].frame[x] = new MovedType(this.type_environment[i].frame[x])
+                return
             }
-            if (this.type_environment[i] instanceof FunctionTypeFrame) {
-                break; // stop searching once encountered nearest function frame
-            }
-        }
 
-        // If not found, check the global type environment
-        if (this.global_type_frame.frame.hasOwnProperty(x)) {
-            return this.global_type_frame.frame[x]
+            if (this.type_environment[i] instanceof FunctionTypeFrame) {
+                // once encountered nearest function frame, cannot be moved
+                break
+            }
         }
-        print_error("[lookup_type] Unbound name: " + x)
+        print_error(`[mark_moved] Type Environment: ${JSON.stringify(this.type_environment, null, 4)}`)
+        print_error("[mark_moved] Unable to find this symbol within nearest function scope: " + x)
     }
 
     // lookup all environment frames, starting from the most recent
-    lookup_type = (x: string) => {
+    lookup_type(x: string): Type {
+        let must_be_closure: boolean = false;
         for (let i = this.type_environment.length - 1; i >= 0; i--) { 
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
-                return this.type_environment[i].frame[x]
+                const type_found: Type = this.type_environment[i].frame[x] 
+                if (must_be_closure && !(type_found instanceof ClosureType)) {
+                    print_error("[lookup_type] Variable from outer scope: " + x)
+                }
+                return type_found
+            }
+
+            if (this.type_environment[i] instanceof FunctionTypeFrame) {
+                // once encountered nearest function frame, can only return closure
+                must_be_closure = true 
             }
         }
 
@@ -95,8 +103,8 @@ export class TypeEnvironment {
             print_error('too many parameters in function declaration')
 
         const new_frame: TypeFrame = is_blocktypeframe 
-                                        ? new BlockTypeFrame()
-                                        : new FunctionTypeFrame()
+        ? new BlockTypeFrame()
+        : new FunctionTypeFrame()
         for (let i = 0; i < xs.length; i++) 
             new_frame.add_variable(xs[i], ts[i])
         this.push(new_frame)
@@ -276,7 +284,11 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
 
     if (t1 instanceof UnitType) {
         return true;
-    } 
+    }
+
+    if (t1 instanceof MovedType) {
+        print_error(`[compare_type] Should not encounter a MovedType during type comparison: ${unparse_type(t1)}`);
+    }
 
     return false;
 };
@@ -322,6 +334,10 @@ export const unparse_type = (t: Type): string => {
 
     if (t instanceof ReturnType) {
         return `retType<${unparse_type(t.ReturnedType)}>`
+    }
+
+    if (t instanceof MovedType) {
+        return `MOVED<${unparse_type(t.OriginalType)}>`
     }
     
     if (t === undefined) {

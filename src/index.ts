@@ -72,6 +72,12 @@ fn main() {
         x = pass3() + pass3() + x;
         let mut y: i32 = pass3() + pass3();
         y = y + x;
+        let TEST: i32 = 100;
+        {
+            // y = TEST;
+            let z: i32 = TEST;
+        }
+        x = TEST;
         return y;
     }
 

@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MovedType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -292,7 +292,7 @@ function log(message: any, enclosing_function: string): void {
 // In a single scope, there cannot be reassignment of a variable to a different type.
 
 // --- MOVING OWNERSHIP ---
-// CASE 1: Assignment.
+// CASE 1: Assignment/Let.
 // E.g. let x: i32 = 3; let y = x;
 // Note: we cannot move ownership of an outer variable inside a function body block. e.g. let x: i32 = 3; fn f() {let y = x};
 // ---> "error[E0434]: can't capture dynamic environment in a fn item"
@@ -302,8 +302,8 @@ function log(message: any, enclosing_function: string): void {
 // The case where x and y are declared in nested block scope (could be if or while scope also), let x: i32 = 3; {let y = x;}
 // The variable that is assigned as x (ie. y) will have the same type as x.
 // The variable moved (ie. x) will be marked as no longer owned in the outer scope's type frame by being set to MovedType. 
-// Using the moved variable will throw an error. ---> "error[E0382]: borrow of moved value: `x`"
-// However, reassigning the moved variable is allowed if the new assignment follows the original type of the variable
+// Using the moved variable will throw an error. ---> "error[E0382]: borrow of moved value: `x`", "error[E0382]: use of moved value: `TEST`"
+// However, reassigning the moved variable is allowed in rust if the new assignment follows the original type of the variable
 // e.g. fn main() {
 //          let mut x: String = String::from("1");
 //          if true {
@@ -311,6 +311,7 @@ function log(message: any, enclosing_function: string): void {
 //          }
 //          x = String::from("2");
 //      }
+// We might want to disallow reassigning of a moved variable altogether.
 
 // CASE 2: Passing Arguments to Function call.
 // E.g. let x: i32 = 3; let y = f(x);
@@ -372,8 +373,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 }
             }
         });
+        // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
         te.extend_type_environment(locals, typelist, IS_BLOCKTYPEFRAME)
-        log(`TYPE ENVIRONMENT: ${JSON.stringify(te)}`, "CRATE")
+        // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
+
+        log(`TYPE ENVIRONMENT: ${JSON.stringify(te, null, 4)}`, "CRATE")
         return this.visitChildren(ctx)
     }
 
@@ -405,6 +409,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // how far to lookup type env (up to nearest func frame or all the way)
         const symbol = this.visitChildren(ctx)
         const type: Type = te.lookup_type(symbol)
+        if (type instanceof MovedType) {
+            print_error(`Type error in lookup; use of a moved value: ${symbol}`)
+        }
         log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
@@ -519,7 +526,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
         }
 
+        // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
         te.extend_type_environment(syms, types, IS_BLOCKTYPEFRAME);
+        // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
 
         // type check each statement in the block.
         // the type of the block is the type of the LAST statement/expression in the block.
@@ -566,7 +575,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (!expected_type.Mutable) {
             print_error('Tried to assign when variable is immutable!')
         }
-        // TODO: implement ownership transfer (move)
+
+        // An assignment that moves ownership is happening. let y = x; as opposed to let y = x + z;
+        if (ctx.expression(1) instanceof PathExpression_Context) {
+            const symbol: string = this.visitChildren(ctx.expression(1).getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
+            log(`MARKING SYMBOL AS MOVED: ${symbol}`, "ASSIGNMENT_EXPRESSION");
+            te.mark_moved(symbol)
+        }
 
         return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
     }
@@ -605,6 +620,17 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // typecheck arguments
         if (!compare_types(expected_arg_types, actual_arg_types)) {
             print_error("Type error in application; argument types unmatched.")
+        }
+
+        if (actual_arg_types.length > 0) {
+            ctx.callParams().expression().forEach(expr => {
+                // Case where variables passed to function argument leads to moving ownership
+                if (expr instanceof PathExpression_Context) {
+                    const symbol: string = this.visitChildren(expr.getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
+                    log(`MARKING SYMBOL AS MOVED: ${symbol}`, "CALL_EXPRESSION");
+                    te.mark_moved(symbol)
+                }
+            });
         }
 
         return expected_type.ReturnType;
@@ -928,8 +954,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
         log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
+        // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
         te.extend_type_environment(param_names, param_types, IS_FUNCTIONTYPEFRAME)
-        
+        // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
+
         if (ctx.blockExpression() === null) {
             print_error("Function without body!")
         }
@@ -1023,8 +1051,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
-        // TODO: implement ownership transfer (move)
-
+        // An assignment that moves ownership is happening. let y = x; as opposed to let y = x + z;
+        if (ctx.expression() instanceof PathExpression_Context) {
+            const symbol: string = this.visitChildren(ctx.expression().getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
+            log(`MARKING SYMBOL AS MOVED: ${symbol}`, "LET_STATEMENT");
+            te.mark_moved(symbol)
+        }
+        
         return new UnitType(); // statements produce undefined
     }
 
