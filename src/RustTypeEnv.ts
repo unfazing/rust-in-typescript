@@ -31,6 +31,7 @@ export const peek = (array, address) => array.slice(-1 - address)[0];
 export class TypeEnvironment {
     type_environment: TypeFrame[]
     private global_type_frame: TypeFrame
+
     constructor() {
         this.type_environment = empty_type_environment
         this.global_type_frame = new GlobalTypeFrame()
@@ -75,13 +76,17 @@ export class TypeEnvironment {
     }
 
     // lookup all environment frames, starting from the most recent
+    // returns the type of the symbol if it exists, else return undefined
     lookup_type(x: string): Type {
         let must_be_closure: boolean = false;
         for (let i = this.type_environment.length - 1; i >= 0; i--) { 
+
+            // found symbol in current frame, terminate early
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
                 if (must_be_closure && !(type_found instanceof ClosureType)) {
                     print_error("[lookup_type] Variable from outer scope: " + x)
+                    return undefined;
                 }
                 return type_found
             }
@@ -96,21 +101,18 @@ export class TypeEnvironment {
         if (this.global_type_frame.frame.hasOwnProperty(x)) {
             return this.global_type_frame.frame[x]
         }
+
         print_error("[lookup_type] Unbound name: " + x)
+        return undefined;
     }
 
     // extend the environment destructively 
-    extend_type_environment = (xs: string[], ts: Type[], is_blocktypeframe: boolean) => {
-        if (ts.length > xs.length) 
-            print_error('too few parameters in function declaration')
-        if (ts.length < xs.length) 
-            print_error('too many parameters in function declaration')
+    extend_type_environment = (is_blocktypeframe: boolean) => {
 
         const new_frame: TypeFrame = is_blocktypeframe 
-                                    ? new BlockTypeFrame()
-                                    : new FunctionTypeFrame()
-        for (let i = 0; i < xs.length; i++) 
-            new_frame.add_variable(xs[i], ts[i])
+            ? new BlockTypeFrame() 
+            : new FunctionTypeFrame()
+
         this.push(new_frame)
     }
 
@@ -119,6 +121,12 @@ export class TypeEnvironment {
         // TODO: add logic to update borrow status before popping
         this.pop() 
     }
+
+    add_symbol_to_current_frame(symbol: string, type: Type) {
+        const current_frame = this.peek();
+        current_frame.add_variable(symbol, type);
+    }
+
 }
 
 
@@ -130,6 +138,7 @@ export abstract class TypeFrame {
 
     // add a new variable to the frame
     add_variable = (x: string, t: Type) => {
+        // NATHAN: should we allow reassignment of symbol since we are scanning statement by statement?
         if (this.frame.hasOwnProperty(x)) {
             print_error(`[add_variable] Variable ${x} already exists in the frame`)
         }

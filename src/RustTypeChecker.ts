@@ -370,44 +370,46 @@ const IS_FUNCTIONTYPEFRAME = false
 class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
     // entry node
     visitCrate(ctx: CrateContext): Type {
-        let locals: string[] = []
-        let typelist: Type[] = []
-        ctx.item().forEach(item => {
-            log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
+        // let locals: string[] = []
+        // let typelist: Type[] = []
+        // ctx.item().forEach(item => {
+        //     log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
 
-            if (item.visItem()) {
-                const visItem = item.visItem();
+        //     if (item.visItem()) {
+        //         const visItem = item.visItem();
 
-                if (visItem.function_()) {
-                    const fun_ctx: Function_Context = visItem.function_()
-                    const symbol: string = this.visit(fun_ctx.identifier());
-                    const paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
-                    const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType();
-                    const type: ClosureType = new ClosureType(paramTypes, returnType)
+        //         if (visItem.function_()) {
+        //             const fun_ctx: Function_Context = visItem.function_()
+        //             const symbol: string = this.visit(fun_ctx.identifier());
+        //             const paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
+        //             const returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType();
+        //             const type: ClosureType = new ClosureType(paramTypes, returnType)
 
-                    log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
-                    locals.push(symbol);
-                    typelist.push(type)
-                }
-                else if (visItem.constantItem()) {
-                    const symbol = this.visit(visItem.constantItem().identifier());
+        //             log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
+        //             locals.push(symbol);
+        //             typelist.push(type)
+        //         }
+        //         else if (visItem.constantItem()) {
+        //             const symbol = this.visit(visItem.constantItem().identifier());
 
-                    if (!visItem.constantItem().type_()) {
-                        print_error(`Missing type for constant ${symbol}.`);
-                    }
+        //             if (!visItem.constantItem().type_()) {
+        //                 print_error(`Missing type for constant ${symbol}.`);
+        //             }
 
-                    const type: Type = this.visit(visItem.constantItem().type_());
+        //             const type: Type = this.visit(visItem.constantItem().type_());
 
-                    log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
-                    locals.push(symbol);
-                    typelist.push(type)
-                } else {
-                    print_error("Unsupported Item type found in outermost scope. Only function and constant declaration allowed.")
-                }
-            }
-        });
+        //             log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "CRATE");
+        //             locals.push(symbol);
+        //             typelist.push(type)
+        //         } else {
+        //             print_error("Unsupported Item type found in outermost scope. Only function and constant declaration allowed.")
+        //         }
+        //     }
+        // });
+
+
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
-        te.extend_type_environment(locals, typelist, IS_BLOCKTYPEFRAME)
+        te.extend_type_environment(IS_BLOCKTYPEFRAME)
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
 
         log(`TYPE ENVIRONMENT: ${JSON.stringify(te, null, 4)}`, "CRATE")
@@ -537,66 +539,69 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return new UnitType();
         }
 
-        let syms: string[] = [];
-        let types: Type[] = [];
+        // let syms: string[] = [];
+        // let types: Type[] = [];
 
-        const statements = ctx.statements().statement();
-        for (const statement of statements) {
-            const stmt = statement.getChild(0) // each statement can only have 1 child
+        // const statements = ctx.statements().statement();
+        // for (const statement of statements) {
+        //     const stmt = statement.getChild(0) // each statement can only have 1 child
 
-            // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
+        //     // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
 
-            if (stmt instanceof LetStatementContext) {
-                let [is_mut, symbol]: [boolean, string] = this.visit(stmt.patternNoTopAlt());
+        //     if (stmt instanceof LetStatementContext) {
+        //         let [is_mut, symbol]: [boolean, string] = this.visit(stmt.patternNoTopAlt());
 
-                if (!stmt.type_()) {
-                    print_error(`Missing type declaration for ${symbol}.`);
-                }
+        //         if (!stmt.type_()) {
+        //             print_error(`Missing type declaration for ${symbol}.`);
+        //         }
 
-                let type: Type = this.visit(stmt.type_());
-                type.Mutable = is_mut;
-                log(`FOUND LET LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "BLOCK_EXPRESSION");
-                syms.push(symbol);
-                types.push(type);
+        //         let type: Type = this.visit(stmt.type_());
+        //         type.Mutable = is_mut;
+        //         log(`FOUND LET LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(type)}`, "BLOCK_EXPRESSION");
+        //         syms.push(symbol);
+        //         types.push(type);
 
-            } else if (stmt instanceof ItemContext) {
-                if (stmt.visItem()) {
-                    if (stmt.visItem().function_()) {
-                        const fun_ctx = stmt.visItem().function_()
-                        let symbol: string = this.visit(fun_ctx.identifier())
-                        let paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
-                        let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType()
-                        const closure: ClosureType = new ClosureType(paramTypes, returnType)
+        //     } else if (stmt instanceof ItemContext) {
+        //         if (stmt.visItem()) {
+        //             if (stmt.visItem().function_()) {
+        //                 const fun_ctx = stmt.visItem().function_()
+        //                 let symbol: string = this.visit(fun_ctx.identifier())
+        //                 let paramTypes: Type[] = fun_ctx.functionParameters() ? this.visit(fun_ctx.functionParameters()) : []
+        //                 let returnType: Type = fun_ctx.functionReturnType() ? this.visit(fun_ctx.functionReturnType()) : new UnitType()
+        //                 const closure: ClosureType = new ClosureType(paramTypes, returnType)
 
-                        log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(closure)}`, "BLOCK_EXPRESSION");
-                        syms.push(symbol);
-                        types.push(closure);
+        //                 log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol} WITH TYPE ${unparse_type(closure)}`, "BLOCK_EXPRESSION");
+        //                 syms.push(symbol);
+        //                 types.push(closure);
 
-                    } else if (stmt.visItem().constantItem()) {
-                        let symbol: string = this.visit(stmt.visItem().constantItem().identifier())
+        //             } else if (stmt.visItem().constantItem()) {
+        //                 let symbol: string = this.visit(stmt.visItem().constantItem().identifier())
 
-                        if (!stmt.visItem().constantItem().type_()) {
-                            print_error(`Missing type declaration for constant ${symbol}.`);
-                        }
+        //                 if (!stmt.visItem().constantItem().type_()) {
+        //                     print_error(`Missing type declaration for constant ${symbol}.`);
+        //                 }
 
-                        let type: Type = this.visit(stmt.visItem().constantItem().type_());
+        //                 let type: Type = this.visit(stmt.visItem().constantItem().type_());
 
-                        log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${symbol}`, "BLOCK_EXPRESSION");
-                        syms.push(symbol);
-                        types.push(type);
-                    }
-                }
-            }
-        }
+        //                 log(`FOUND CONST LOCAL SYMBOL: ${symbol} WITH TYPE ${symbol}`, "BLOCK_EXPRESSION");
+        //                 syms.push(symbol);
+        //                 types.push(type);
+        //             }
+        //         }
+        //     }
+        // }
 
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
-        te.extend_type_environment(syms, types, IS_BLOCKTYPEFRAME);
+        te.extend_type_environment(IS_BLOCKTYPEFRAME);
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
 
         // type check each statement in the block.
-        // the type of the block is the type of the LAST statement/expression in the block.
+        // the type of the block is the type of the 
+        // LAST statement/expression in the block.
         let blockType: Type = new UnitType();
         let returned: boolean = false
+
+        const statements = ctx.statements().statement();
         for (const statement of statements) {
             log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
             blockType = this.visit(statement)
@@ -606,6 +611,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 break
             }
         }
+
+        // if the block has a final expression and no return statement before
+        // the type of the block is the type of the final expression
         if (!returned && ctx.statements().expression()) {
             blockType = this.visit(ctx.statements().expression())
             log(`FINAL EXPRESSION ENCOUNTERED: ${ctx.statements().expression().getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
@@ -709,7 +717,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
         }
 
-        return expected_type.ReturnType;
+        return expected_type.ReturnType; 
     }
 
     visitArithmeticOrLogicalExpression(ctx: ArithmeticOrLogicalExpressionContext): Type {
@@ -1031,7 +1039,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
-        te.extend_type_environment(param_names, param_types, IS_FUNCTIONTYPEFRAME)
+        te.extend_type_environment(IS_FUNCTIONTYPEFRAME)
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
 
         if (ctx.blockExpression() === null) {
@@ -1110,18 +1118,32 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
     // ;
     // IN OUR SIMPLE IMPLEMENTATION -> ALL LET STATEMENT MUST HAVE ASSIGNMENT ALSO
-    visitLetStatement(ctx: LetStatementContext): Type {
-        // Question: why look up type in environment when the type is declared?
-        // Not sure if scanning out into type environment works correctly now, would serve as a sanity check when we run
-        // Can directly access type when confident.
-        const [_, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
-        const expected_type: Type = te.lookup_type(symbol);
-        let actual_type: Type = this.visit(ctx.expression()); // either a literal expression, a pathExpression, a callExpression, or a IfExpression 
+    visitLetStatement(ctx: LetStatementContext): Type { 
+        const [is_mut_var, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         
-        if (ctx.expression() instanceof CallExpressionContext) {
-            actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
+        if (!ctx.type_()) {
+            print_error(`Missing type declaration for ${symbol}.`);
         }
 
+        if (!ctx.expression()) {
+            print_error(`Missing assignment in let statement for ${symbol}.`);
+        }
+    
+        let expected_type: Type = this.visit(ctx.type_());
+
+        // either  
+        // 1. literal expression, arithmeticExpression, comparisonExpression...
+        // 2. pathExpression, 
+        // 3. callExpression, 
+        // 4. IfExpression (ternary)
+        // 5. borrowExpression (e.g. &x)
+        // 6. blockExpression ({ } in Rust produces value)
+        let actual_type: Type = this.visit(ctx.expression()); 
+
+        // NATHAN: no need to unwrap type of callExpression, because callExpression never have ReturnType.
+        // However, blockExpression and ifExpression may have ReturnType
+        actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
+        
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
         if (!compare_type(expected_type, actual_type)) {
@@ -1135,8 +1157,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 print_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
             }
             log(`MARKING SYMBOL AS MOVED: ${symbol}`, "LET_STATEMENT");
-            te.mark_moved(symbol)
+            te.mark_moved(symbol);
         }
+
+        // assign mutability of this new variable
+        actual_type.Mutable = is_mut_var;
+
+        // IMPORTANT: we assign the actual type (instead of the expected type) to the variable in the environment.
+        // The actual type may already exist (or contain inner types already that exist) in the environment.
+        te.add_symbol_to_current_frame(symbol, actual_type);
+
+        // NATHAN: Should we allow reassignment of symbol?
+        // if we do, we open a can of worms (check variable shadowing)
         
         return new UnitType(); // statements produce undefined
     }
