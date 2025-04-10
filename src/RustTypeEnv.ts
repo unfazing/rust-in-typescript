@@ -56,7 +56,11 @@ export class TypeEnvironment {
     mark_moved(x: string) {
         for (let i = this.type_environment.length - 1; i >= 0; i--) { 
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
-                assert(!(this.type_environment[i].frame[x] instanceof MovedType), `ASSERT FAILED: Trying to move a moved value: ${x}`)
+                assert(!(this.type_environment[i].frame[x] instanceof MovedType), 
+                        `ASSERT FAILED: Trying to move a moved value: ${x}`)
+                assert(this.type_environment[i].frame[x].ImmutableBorrowCount || 
+                        this.type_environment[i].frame[x].MutableBorrowExists,
+                        `ASSERT FAILED: Trying to move a borrowed value: ${x}`)
                 this.type_environment[i].frame[x] = new MovedType(this.type_environment[i].frame[x])
                 return
             }
@@ -103,8 +107,8 @@ export class TypeEnvironment {
             print_error('too many parameters in function declaration')
 
         const new_frame: TypeFrame = is_blocktypeframe 
-        ? new BlockTypeFrame()
-        : new FunctionTypeFrame()
+                                    ? new BlockTypeFrame()
+                                    : new FunctionTypeFrame()
         for (let i = 0; i < xs.length; i++) 
             new_frame.add_variable(xs[i], ts[i])
         this.push(new_frame)
@@ -174,10 +178,10 @@ export abstract class Type {
     Mutable: boolean
     TypeName: TypeName
     MutableBorrowExists: boolean
-    ImmutableBorrowExists: number
+    ImmutableBorrowCount: number
     constructor() {
         this.MutableBorrowExists = false
-        this.ImmutableBorrowExists = 0
+        this.ImmutableBorrowCount = 0
     }
 }
 
@@ -328,11 +332,11 @@ export const unparse_type = (t: Type): string => {
         borrow_str = "___&mut";
     }  
     
-    if (t.ImmutableBorrowExists > 0) {
-        borrow_str += "___&_" + t.ImmutableBorrowExists;
+    if (t.ImmutableBorrowCount > 0) {
+        borrow_str += "___&_" + t.ImmutableBorrowCount;
     }
 
-    assert(!(t.MutableBorrowExists && t.ImmutableBorrowExists), `ASSERT FAILED: Cannot have both mutable and immutable borrows at the same time: ${JSON.stringify(t)}`)
+    assert(!(t.MutableBorrowExists && t.ImmutableBorrowCount), `ASSERT FAILED: Cannot have both mutable and immutable borrows at the same time: ${JSON.stringify(t)}`)
 
     // Handle primitive types (string case)
     if (t instanceof ScalarType) {
