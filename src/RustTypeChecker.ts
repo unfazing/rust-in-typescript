@@ -323,6 +323,33 @@ function log(message: any, enclosing_function: string): void {
 // No real change is required to the type environment in this case.
 // The variable that is assigned will have the same type as the return type of f().
 
+// SIMPLE IMPLEMENTATION OF BORROW CHECKING
+// In the simple implementation, a borrow is considered alive if it's scope has not ended
+// In rust, the liveness of a borrow is determined if it is going to be used again later.
+
+// If there is a &mut on a var that is still alive
+// - owner cannot read or write to the var
+// - cannot create another reference to the var
+// - cannot move the ownership of the var 
+
+// If there is a & on a var that is still alive
+// - Owner cannot write to the var (assign or call methods on the var)
+// - Cannot create a &mut reference to the var that will write to it
+// - Cannot move the ownership of the var 
+
+// Type Environment
+// Augment the current type environment with borrow information.
+// e.g. let y: &i32 = &x;
+// Every refType must be associated with the symbol of the borrowed variable
+// This way, when y is out of scope, we can lookup x again on the Type Environment to release the borrow
+// At the same time, x's Type information must have a borrow status on whether
+// a. there exists a mutable borrow
+// b. the number of immutable borrows
+// When y is out of scope, x's Type borrow status will be updated to reflect the change.
+// During creation of borrows, check the target variable's borrow status to see if the borrow is valid.
+// However, if a borrow is created directly from a literalExpression, then we do not need to check anything
+// Because the lifetime of the literalExpression is the same as the borrow.
+
 
 let te: TypeEnvironment = global_type_environment // an array of frame objects that map symbol to type
 let returnTypeStack: Type[] = [] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
@@ -410,8 +437,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const symbol = this.visitChildren(ctx)
         const type: Type = te.lookup_type(symbol)
         if (type instanceof MovedType) {
-            print_error(`Type error in lookup; use of a moved value: ${symbol}`)
+            print_error(`Type error in pathExpression; use of a moved value: ${symbol}`)
         }
+
+        if (type.ImmutableBorrowExists) {
+            print_error(`Type error in pathExpression; use of a mutably borrowed value: ${symbol}`)
+        }
+
         log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
@@ -420,19 +452,46 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitBorrowExpression(ctx: BorrowExpressionContext): Type {
         const is_mut: boolean = (ctx.KW_MUT() != null)
         const inner_type: Type = this.visit(ctx.expression());
+        let symbol: string
         log(`BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "BORROW_EXPRESSION");
         
-        if (is_mut && !inner_type.Mutable) {
-            print_error("Type error in borrow expression; mutable reference must reference a mutable type.");
+    
+        // A borrow of a variable is happening. e.g. let y = &x; (as opposed to let y = &String::from("1");)
+        if (ctx.expression() instanceof PathExpression_Context) {
+            symbol = this.visitChildren(ctx.expression().getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
+            log(`AN ${is_mut ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED ON: ${symbol}`, "BORROW_EXPRESSION");
+            if (is_mut && !inner_type.Mutable) {
+                print_error(`Type error in borrow expression; cannot borrow ${symbol} as mutable, as it is not declared as mutable.`);
+            }
+            let borrowedType: Type = te.lookup_type(symbol)
+            if (borrowedType instanceof MovedType) {
+                print_error(`Type error in borrow expression; cannot borrow moved value: ${symbol}`);
+            }
+
+            if (borrowedType.MutableBorrowExists) {
+                print_error(`Type error in borrow expression; cannot borrow ${symbol}, as it already has a mutable borrow.`);
+            }
+
+            if (borrowedType.ImmutableBorrowExists > 0 && is_mut) {
+                print_error(`Type error in borrow expression; cannot borrow ${symbol} as mutable, as it already has an immutable borrow.`);
+            }
+
+            if (is_mut) {
+                borrowedType.MutableBorrowExists = true;
+            } else {
+                borrowedType.ImmutableBorrowExists++;
+            }
         }
 
         if (ctx.AND()) {
-            return is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
+            return is_mut ? new MutableRefType(inner_type, symbol) : new ImmutableRefType(inner_type, symbol)
         }
 
+        // TODO: Check if it is okay to ignore nestedness in updating variable's borrow status
+        // e.g. on the type environment, let y = &x; vs let y = &&x; both simply adds an immutable borrow x. 
         if (ctx.ANDAND()) {
-            let inner_ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
-            let outer_ref_type: RefType = new ImmutableRefType(inner_ref_type);
+            let inner_ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type, symbol)
+            let outer_ref_type: RefType = new ImmutableRefType(inner_ref_type, symbol);
             return outer_ref_type;
         }
     }
@@ -562,6 +621,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const expected_type: Type = this.visit(ctx.expression(0)); // type lookup done in pathExpression node
         let actual_type: Type = this.visit(ctx.expression(1));
 
+        if (!expected_type.Mutable) {
+            print_error('Type error in assignment; tried to assign when variable is immutable!')
+        }
+
+        if (expected_type.ImmutableBorrowExists) {
+            print_error(`Type error in assignment; cannot assign to a borrowed value: ${unparse_type(expected_type)}`);
+        }
+
         if (ctx.expression(1) instanceof CallExpressionContext) {
             actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
         }
@@ -572,13 +639,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
-        if (!expected_type.Mutable) {
-            print_error('Tried to assign when variable is immutable!')
-        }
-
         // An assignment that moves ownership is happening. let y = x; as opposed to let y = x + z;
         if (ctx.expression(1) instanceof PathExpression_Context) {
             const symbol: string = this.visitChildren(ctx.expression(1).getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
+            if (actual_type.ImmutableBorrowExists || actual_type.MutableBorrowExists) {
+                print_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
+            }
             log(`MARKING SYMBOL AS MOVED: ${symbol}`, "ASSIGNMENT_EXPRESSION");
             te.mark_moved(symbol)
         }

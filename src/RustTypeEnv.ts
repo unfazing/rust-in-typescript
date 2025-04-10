@@ -112,6 +112,7 @@ export class TypeEnvironment {
 
     // pop the last (most recent) frame
     restore_type_environment() {
+        // TODO: add logic to update borrow status before popping
         this.pop() 
     }
 }
@@ -172,6 +173,12 @@ export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "return
 export abstract class Type {
     Mutable: boolean
     TypeName: TypeName
+    MutableBorrowExists: boolean
+    ImmutableBorrowExists: number
+    constructor() {
+        this.MutableBorrowExists = false
+        this.ImmutableBorrowExists = 0
+    }
 }
 
 // NOT A REAL TYPE - used to indicate that a variable has been moved
@@ -213,6 +220,7 @@ export class ClosureType extends Type {
 
 export abstract class RefType extends Type {
     InnerType: Type
+    OriginalSymbol: string
     constructor() {
         super()
         this.TypeName = "refType"
@@ -220,17 +228,19 @@ export abstract class RefType extends Type {
 }
 
 export class ImmutableRefType extends RefType {
-    constructor(innerType: Type, is_mut?: boolean) {
+    constructor(innerType: Type, originalSymbol?: string, is_mut?: boolean, ) {
         super()
         this.InnerType = innerType
+        this.OriginalSymbol = originalSymbol
         this.Mutable = is_mut
     }
 }
 
 export class MutableRefType extends RefType {
-    constructor(innerType: Type, is_mut?: boolean) {
+    constructor(innerType: Type, originalSymbol?: string, is_mut?: boolean, ) {
         super()
         this.InnerType = innerType
+        this.OriginalSymbol = originalSymbol
         this.Mutable = is_mut
     }
 }
@@ -310,22 +320,36 @@ export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
 };
 
 export const unparse_type = (t: Type): string => {
+    // Get borrow status
+    // Returns "_&mut" if mutable borrow exists
+    // Returns "_&_<n>" where n is the number of immutable borrows if immutable borrow exists
+    let borrow_str: string = "";
+    if (t.MutableBorrowExists) {
+        borrow_str = "___&mut";
+    }  
+    
+    if (t.ImmutableBorrowExists > 0) {
+        borrow_str += "___&_" + t.ImmutableBorrowExists;
+    }
+
+    assert(!(t.MutableBorrowExists && t.ImmutableBorrowExists), `ASSERT FAILED: Cannot have both mutable and immutable borrows at the same time: ${JSON.stringify(t)}`)
+
     // Handle primitive types (string case)
     if (t instanceof ScalarType) {
-        return t.TypeName;
+        return t.TypeName + borrow_str;
     }
 
     // Handle reference type
     if (t instanceof RefType) {
         const ref_str = t instanceof MutableRefType ? "&mut " : "&";
-        return `${ref_str}${unparse_type(t.InnerType)}`;
+        return `${ref_str}${unparse_type(t.InnerType)}${borrow_str}`;
     }
     
     // Handle closure types
     if (t instanceof ClosureType) {
         const params = t.ParamTypes.map(unparse_type).join(', ');
         const return_type = unparse_type(t.ReturnType);
-        return `fn(${params}) -> ${return_type}`;
+        return `fn(${params}) -> ${return_type}${borrow_str}`;
     }
 
     if (t instanceof UnitType) {
@@ -333,11 +357,11 @@ export const unparse_type = (t: Type): string => {
     }
 
     if (t instanceof ReturnType) {
-        return `retType<${unparse_type(t.ReturnedType)}>`
+        return `retType<${unparse_type(t.ReturnedType)}>${borrow_str}`
     }
 
     if (t instanceof MovedType) {
-        return `MOVED<${unparse_type(t.OriginalType)}>`
+        return `MOVED<${unparse_type(t.OriginalType)}>${borrow_str}`
     }
     
     if (t === undefined) {
