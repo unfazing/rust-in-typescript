@@ -160,17 +160,17 @@ export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "return
 // t.Mutable is only meaningful for declared variables. e.g. let mut x: &i32; --> <ImmutableRefType>.Mutable = True
 // Otherwise, t.Mutable can be 'undefined' e.g. 3; --> <ScalarType>.Mutable = undefined
 export abstract class Type {
-    Mutable: boolean
     TypeName: TypeName
+    Mutable: boolean
+    IsMoved: boolean
     MutableBorrowExists: boolean
     ImmutableBorrowCount: number
-    IsMoved: boolean
 
     constructor() {
+        this.Mutable = false
+        this.IsMoved = false
         this.MutableBorrowExists = false
         this.ImmutableBorrowCount = 0
-        this.IsMoved = false
-        this.Mutable = false
     }
 }
 
@@ -193,7 +193,7 @@ export class UnitType extends Type {
 export class ClosureType extends Type {
     ParamTypes: Type[]
     ReturnType: Type
-    constructor(paramTypes: Type[], returnTypes: Type) { // function is never mutable in Rust.
+    constructor(paramTypes: Type[], returnTypes: Type) { // function is never mutable, and never moved.
         super()
         this.ParamTypes = paramTypes
         this.ReturnType = returnTypes
@@ -245,10 +245,8 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return false;
     }
 
-    if (t1.IsMoved || t2.IsMoved) {
-        print_error(`[compare_type] Should not encounter a moved type during type comparison.`);
-    }
-
+    assert(!(t1.IsMoved || t2.IsMoved), `[compare_type] Should not encounter a moved type during type comparison.`);
+    
     // Compare the class type at runtime
     // If different types, return false
     if (t1.constructor !== t2.constructor) {
@@ -262,7 +260,8 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
 
     // Compare Closures
     if (t1 instanceof ClosureType) {
-        return compare_types(t1.ParamTypes, (t2 as ClosureType).ParamTypes) && compare_type(t1.ReturnType, (t2 as ClosureType).ReturnType);
+        return compare_types(t1.ParamTypes, (t2 as ClosureType).ParamTypes) 
+            && compare_type(t1.ReturnType, (t2 as ClosureType).ReturnType);
     }
 
     // Compare References
@@ -307,6 +306,7 @@ export const unparse_type = (t: Type): string => {
     // Returns "_&mut" if mutable borrow exists
     // Returns "_&_<n>" where n is the number of immutable borrows if immutable borrow exists
     let borrow_str: string = "";
+
     if (t.MutableBorrowExists) {
         borrow_str = "___&mut";
     }  
@@ -315,36 +315,40 @@ export const unparse_type = (t: Type): string => {
         borrow_str += "___&_" + t.ImmutableBorrowCount;
     }
 
-    assert(!(t.MutableBorrowExists && t.ImmutableBorrowCount), `ASSERT FAILED: Cannot have both mutable and immutable borrows at the same time: ${JSON.stringify(t)}`)
+    assert(
+        !(t.MutableBorrowExists && t.ImmutableBorrowCount), 
+        `[unparse_type] Cannot have both mutable and immutable borrows at the same time: ${JSON.stringify(t)}`
+    )
+
+    let moved_str = ""
+    if (t.IsMoved) {
+        moved_str = "Moved "
+    }
 
     // Handle primitive types (string case)
     if (t instanceof ScalarType) {
-        return t.TypeName + borrow_str;
+        return moved_str + t.TypeName + borrow_str;
     }
 
     // Handle reference type
     if (t instanceof RefType) {
         const ref_str = t instanceof MutableRefType ? "&mut " : "&";
-        return `${ref_str}${unparse_type(t.InnerType)}${borrow_str}`;
+        return moved_str + `${ref_str}${unparse_type(t.InnerType)}${borrow_str}`;
     }
     
     // Handle closure types
     if (t instanceof ClosureType) {
         const params = t.ParamTypes.map(unparse_type).join(', ');
         const return_type = unparse_type(t.ReturnType);
-        return `fn(${params}) -> ${return_type}${borrow_str}`;
+        return moved_str + `fn(${params}) -> ${return_type}${borrow_str}`;
     }
 
     if (t instanceof UnitType) {
-        return "()";
+        return moved_str + "()";
     }
 
     if (t instanceof ReturnType) {
-        return `retType<${unparse_type(t.ReturnedType)}>${borrow_str}`
-    }
-
-    if (t instanceof MovedType) {
-        return `MOVED<${unparse_type(t.OriginalType)}>${borrow_str}`
+        return moved_str + `retType<${unparse_type(t.ReturnedType)}>${borrow_str}`
     }
     
     if (t === undefined) {

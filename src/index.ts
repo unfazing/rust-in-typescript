@@ -34,10 +34,8 @@ console.log(result)
 import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
-import { RustEvaluatorVisitor } from './RustEvaluatorVisitor.js'
 import { RustCompiler } from './RustCompiler.js';
 import { RustTypeChecker } from './RustTypeChecker.js';
-
 
 const chunk = `
 fn main() {
@@ -149,18 +147,32 @@ fn main() {
     //     let mut y: i32 = return 6;
     // }
     
-    fn pass_ref_1() -> () {
-        let x : i32 = 2;
-        let x_ref : &i32 = &x;
-        let x_ref_2 : &i32 = x_ref;
-        *x_ref_2;
+    // fn pass_ref_1() -> () {
+    //     let x : i32 = 42;
+    //     let x_ref : &i32 = &x; // borrow
+    //     let x_ref_2 : &i32 = x_ref; // move a borrow
+    //     *x_ref_2; 
+    // }
+
+    // fn fail_ref_1() -> () {
+    //     let x : i32 = 2;
+    //     let x_ref : &i32 = &x;
+    //     let x_ref_2 : &i32 = x_ref;
+    //     *x_ref; // cannot deref a moved var
+    // }
+
+    fn pass_deref_assign() {
+        let mut x: i32 = 42;
+        let x_ref: &mut i32 = &mut x;
+        *x_ref = 69;
+        ((*x_ref)) = 69;
     }
 
-    fn fail_ref_1() -> () {
-        let x : i32 = 2;
-        let x_ref : &i32 = &x;
-        let x_ref_2 : &i32 = x_ref;
-        *x_ref;
+    fn fail_deref_assign() {
+        let mut x: i32 = 42;
+        let x_ref: &i32 = &x;
+        *x_ref = 69;
+        ((*x_ref)) = 69;
     }
 }
 `
