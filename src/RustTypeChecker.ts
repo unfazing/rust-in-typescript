@@ -1036,6 +1036,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             
             // add symbol mapping to current function frame
             te.add_symbol_to_current_frame(parameter_sym, expected_param_types[i]);
+
+            // the actual assignment of arguments to parameters is done in visitCallExpression
         }
         log(`PARAM TYPES: ${expected_param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
@@ -1121,7 +1123,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // ;
     // IN OUR SIMPLE IMPLEMENTATION -> ALL LET STATEMENT MUST HAVE ASSIGNMENT ALSO
     visitLetStatement(ctx: LetStatementContext): Type { 
-        const [is_mut_var, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
+        const [is_mut, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         
         if (!ctx.type_()) {
             print_error(`Missing type declaration for ${symbol}.`);
@@ -1132,6 +1134,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         let expected_type: Type = this.visit(ctx.type_());
+        expected_type.Mutable = is_mut;
 
         // either  
         // 1. literal expression, arithmeticExpression, comparisonExpression...
@@ -1142,9 +1145,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // 6. blockExpression ({ } in Rust produces value)
         let actual_type: Type = this.visit(ctx.expression()); 
 
-        // NATHAN: no need to unwrap type of callExpression, because callExpression never have ReturnType.
-        // However, blockExpression and ifExpression may have ReturnType
-        actual_type = actual_type instanceof ReturnType ? actual_type.ReturnedType : actual_type // unwrap return type
+        // blockExpression and ifExpression may have ReturnType
+        // e.g, let x : i32 = { return 2; }
+        if (actual_type instanceof ReturnType) {
+            return actual_type; // allows block expression to terminate early 
+        }
         
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
@@ -1162,12 +1167,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             te.mark_moved(symbol);
         }
 
-        // assign mutability of this new variable
-        actual_type.Mutable = is_mut_var;
+        // do a shalow copy of the inner type during borrowing
+        if (expected_type instanceof RefType) {
+            expected_type.InnerType = (actual_type as RefType).InnerType; 
+        }
 
-        // IMPORTANT: we assign the actual type (instead of the expected type) to the variable in the environment.
-        // The actual type may already exist (or contain inner types already that exist) in the environment.
-        te.add_symbol_to_current_frame(symbol, actual_type);
+        te.add_symbol_to_current_frame(symbol, expected_type);
 
         // NATHAN: Should we allow reassignment of symbol?
         // I think we should. This is know as variable shadowing.
@@ -1182,7 +1187,16 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // Our implementation does not support static variables, hence constants are not allowed to be borrows.
     visitConstantItem(ctx: ConstantItemContext): Type {
         const symbol: string = this.visit(ctx.identifier());
-        const expected_type: Type = te.lookup_type(symbol);
+
+        if (!ctx.type_()) {
+            print_error(`Missing type declaration for constant ${symbol}.`);
+        }
+
+        if (!ctx.expression()) {
+            print_error(`Missing assignment for constant ${symbol}.`);
+        }
+
+        const expected_type: Type = this.visit(ctx.type_());
         const actual_type: Type = this.visit(ctx.expression());
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
 
@@ -1193,6 +1207,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (!compare_type(expected_type, actual_type)) {
             print_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
+
+        te.add_symbol_to_current_frame(symbol, expected_type); // expected_type is not mutable by default
 
         return new UnitType() // statements produce undefined
     }
