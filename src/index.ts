@@ -58,28 +58,28 @@ fn main() {
     //     return 1;
     // }
 
-    fn pass3() -> i32 {
-        if (true) {
-            return 6;
-        } else {
-            return 7;
-        }
-    }
+    // fn pass3() -> i32 {
+    //     if (true) {
+    //         return 6;
+    //     } else {
+    //         return 7;
+    //     }
+    // }
 
-    fn pass3_1() -> i32 {
-        let mut x: i32 = pass3();
-        x = pass3() + 1;
-        x = pass3() + pass3() + x;
-        let mut y: i32 = pass3() + pass3();
-        y = y + x;
-        let TEST: i32 = 100;
-        {
-            // y = TEST;
-            let z: i32 = TEST;
-        }
-        x = TEST;
-        return y;
-    }
+    // fn pass3_1() -> i32 {
+    //     let mut x: i32 = pass3();
+    //     x = pass3() + 1;
+    //     x = pass3() + pass3() + x;
+    //     let mut y: i32 = pass3() + pass3();
+    //     y = y + x;
+    //     let TEST: i32 = 100;
+    //     {
+    //         // y = TEST;
+    //         let z: i32 = TEST;
+    //     }
+    //     // x = TEST;
+    //     return y;
+    // }
 
     // fn pass4() -> i32 {
     //     fn f8() -> bool {
@@ -104,7 +104,6 @@ fn main() {
     //     let mut x: i32 = if (true) { 6 } else { 7 };
     //     return x;
     // }
-
 
     // SHOULD ERROR
     // fn fail1() -> i32 {
@@ -150,46 +149,19 @@ fn main() {
     //     let mut y: i32 = return 6;
     // }
     
+    fn pass_ref_1() -> () {
+        let x : i32 = 2;
+        let x_ref : &i32 = &x;
+        let x_ref_2 : &i32 = x_ref;
+        *x_ref_2;
+    }
 
-    // const TEST_CONST: i32 = 1;
-    // let mut test_mut_let: i32 = 2;
-    // fn test_closure(p1: i32, p2: i32)-> i32 {
-    //     const FILLER: i32 = 11;
-    //     4
-    //     // return 4.23;
-    // }
-    // test_mut_let = test_mut_let + 6.123;
-    // let test_wrong: f64 = test_closure(4, 5);
-    // let mut x: i32 = 123;
-    // let mut x2: i32 = 123123;
-
-    // let mut y : &mut i32 = &mut x;
-    // *y = 234;
-    //     y = &mut x2;
-
-
-    // let mut z: & &i32 = &y;
-    // y = &x2
-    // while (x < 5) {
-    //     x = x + 1;
-    // }
-
-    // if (true) {
-    //     1;
-    // } // no else branch
-
-    // fn validate(z: i32) -> bool {
-    //     return z >= 2;
-    // }
-
-    // const y : i32 = 5;
-    // if (y < 2) { // comparisonExpression
-    //     return y;
-    // } else if (validate(y)) { // functionCall + another if expression after else
-    //     return y;
-    // } else {
-    //     return y;
-    // }
+    fn fail_ref_1() -> () {
+        let x : i32 = 2;
+        let x_ref : &i32 = &x;
+        let x_ref_2 : &i32 = x_ref;
+        *x_ref;
+    }
 }
 `
 

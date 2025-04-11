@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MovedType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
 import { print_error } from "./Utils.js";
 export class RustTypeChecker {
     private root: ParseTree;
@@ -442,7 +442,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitPathExpression(ctx: PathExpressionContext): Type {
         const symbol = this.visitChildren(ctx)
         const type: Type = te.lookup_type(symbol)
-        if (type instanceof MovedType) {
+        if (type.IsMoved) {
             print_error(`Type error in pathExpression; use of a moved value: ${symbol}`)
         }
 
@@ -651,14 +651,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
-        // An assignment that moves ownership of a variable is happening. let y = x; as opposed to let y = x + z;
-        if (ctx.expression(1) instanceof PathExpression_Context && !(expected_type instanceof ClosureType) && !(expected_type instanceof RefType)) {
+        // An assignment that moves ownership of a variable is happening. y = x; as opposed to y = x + z;
+        if (ctx.expression(1) instanceof PathExpression_Context && !(expected_type instanceof ClosureType)) {
             const symbol: string = this.visitChildren(ctx.expression(1).getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
             if (actual_type.ImmutableBorrowCount || actual_type.MutableBorrowExists) {
                 print_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
             }
             log(`MARKING SYMBOL AS MOVED: ${symbol}`, "ASSIGNMENT_EXPRESSION");
-            te.mark_moved(symbol)
+            actual_type.IsMoved = true;
         }
 
         return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
@@ -689,7 +689,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         log(`EXPECTED CLOSURE TYPE: ${unparse_type(expected_type)}`, "CALL_EXPRESSION");
         if (!(expected_type instanceof ClosureType)) {
             print_error("Type error in application; function application must have function type.")
-            return; // let typescript knows fun_type must be closure
+            return; // let typescript knows expected_type must be closure
         }
 
         const expected_arg_types: Type[] = expected_type.ParamTypes;
@@ -706,13 +706,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 const expr = expressions[i]
                 const type = actual_arg_types[i]
                 // Case where variables passed to function argument leads to moving ownership
-                if (expr instanceof PathExpression_Context && !(type instanceof ClosureType) && !(type instanceof RefType)) {
+                if (expr instanceof PathExpression_Context && !(type instanceof ClosureType)) {
                     const symbol: string = this.visitChildren(expr.getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
                     if (type.ImmutableBorrowCount || type.MutableBorrowExists) {
                         print_error(`Type error in application; cannot move a borrowed value: ${symbol}`);
                     }
                     log(`MARKING SYMBOL AS MOVED: ${symbol}`, "CALL_EXPRESSION");
-                    te.mark_moved(symbol)
+                    type.IsMoved = true;
                 }
             }
         }
@@ -1002,8 +1002,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // )
     // ;
 
-    // TODO: if function takes in more than 1 reference as arguments, and returns a reference
-    // show warning that lifetime of resulting reference is not guaranteed to be valid
+    // TODO: a function that returns a reference must return a reference that it took as a param (compare inner)
+    // TODO: a function can only take up to one reference as a param (avoid needing to annotate lifetime)
     visitFunction_(ctx: Function_Context): Type {
 
         // read type declarations for the function
@@ -1158,13 +1158,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         // An assignment that moves ownership is happening. let y = x; as opposed to let y = x + z;
-        if (ctx.expression() instanceof PathExpression_Context && !(expected_type instanceof ClosureType) && !(expected_type instanceof RefType)) {
+        if (ctx.expression() instanceof PathExpression_Context && !(expected_type instanceof ClosureType)) {
             const symbol: string = this.visitChildren(ctx.expression().getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
             if (actual_type.ImmutableBorrowCount || actual_type.MutableBorrowExists) {
                 print_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
             }
             log(`MARKING SYMBOL AS MOVED: ${symbol}`, "LET_STATEMENT");
-            te.mark_moved(symbol);
+
+            actual_type.IsMoved = true;
         }
 
         // do a shalow copy of the inner type during borrowing

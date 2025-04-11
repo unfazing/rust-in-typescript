@@ -54,27 +54,6 @@ export class TypeEnvironment {
         return this.type_environment[this.type_environment.length - 1]
     }
 
-    mark_moved(x: string) {
-        for (let i = this.type_environment.length - 1; i >= 0; i--) { 
-            if (this.type_environment[i].frame.hasOwnProperty(x) ) {
-                assert(!(this.type_environment[i].frame[x] instanceof MovedType), 
-                        `ASSERT FAILED: Trying to move a moved value: ${x}`)
-                assert(this.type_environment[i].frame[x].ImmutableBorrowCount || 
-                        this.type_environment[i].frame[x].MutableBorrowExists,
-                        `ASSERT FAILED: Trying to move a borrowed value: ${x}`)
-                this.type_environment[i].frame[x] = new MovedType(this.type_environment[i].frame[x])
-                return
-            }
-
-            if (this.type_environment[i] instanceof FunctionTypeFrame) {
-                // once encountered nearest function frame, cannot be moved
-                break
-            }
-        }
-        print_error(`[mark_moved] Type Environment: ${JSON.stringify(this.type_environment, null, 4)}`)
-        print_error("[mark_moved] Unable to find this symbol within nearest function scope: " + x)
-    }
-
     // lookup all environment frames, starting from the most recent
     // returns the type of the symbol if it exists, else return undefined
     lookup_type(x: string): Type {
@@ -129,7 +108,6 @@ export class TypeEnvironment {
 
 }
 
-
 export abstract class TypeFrame {
     frame: {[key:string]: Type}
     constructor() {
@@ -139,9 +117,9 @@ export abstract class TypeFrame {
     // add a new variable to the frame
     add_variable = (x: string, t: Type) => {
         // NATHAN: should we allow reassignment of symbol since we are scanning statement by statement?
-        if (this.frame.hasOwnProperty(x)) {
-            print_error(`[add_variable] Variable ${x} already exists in the frame`)
-        }
+        // if (this.frame.hasOwnProperty(x)) {
+        //     print_error(`[add_variable] Variable ${x} already exists in the frame`)
+        // }
         this.frame[x] = t
     }
 }
@@ -165,8 +143,6 @@ export class BlockTypeFrame extends TypeFrame {
     }
 }
 
-
-
 // Type frames are JavaScript objects that map 
 // symbols (strings) to types.
 
@@ -175,7 +151,7 @@ const empty_type_environment = []
 export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" | "moved"
+export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" 
 
 // Type is a class
 // TypeName is a string. 
@@ -188,19 +164,13 @@ export abstract class Type {
     TypeName: TypeName
     MutableBorrowExists: boolean
     ImmutableBorrowCount: number
+    IsMoved: boolean
+
     constructor() {
         this.MutableBorrowExists = false
         this.ImmutableBorrowCount = 0
-    }
-}
-
-// NOT A REAL TYPE - used to indicate that a variable has been moved
-export class MovedType extends Type {
-    OriginalType: Type
-    constructor(originalType: Type) {
-        super()
-        this.TypeName = "moved"
-        this.OriginalType = originalType
+        this.IsMoved = false
+        this.Mutable = false
     }
 }
 
@@ -275,6 +245,10 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return false;
     }
 
+    if (t1.IsMoved || t2.IsMoved) {
+        print_error(`[compare_type] Should not encounter a moved type during type comparison.`);
+    }
+
     // Compare the class type at runtime
     // If different types, return false
     if (t1.constructor !== t2.constructor) {
@@ -307,10 +281,6 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
 
     if (t1 instanceof UnitType) {
         return true;
-    }
-
-    if (t1 instanceof MovedType) {
-        print_error(`[compare_type] Should not encounter a MovedType during type comparison: ${unparse_type(t1)}`);
     }
 
     return false;
