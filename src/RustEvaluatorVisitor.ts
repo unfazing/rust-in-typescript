@@ -298,6 +298,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.visitChildren(ctx);
         instrs[wc++] = { tag: "EXIT_SCOPE" }
         instrs[wc] = { tag: "DONE" }
+        ce = compile_time_environment_restore(ce)
 
         return instrs; // return the instructions list directly
     }

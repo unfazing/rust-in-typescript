@@ -208,26 +208,249 @@ fn main() {
 }
 `
 
-const inputStream = CharStream.fromString(chunk);
-const lexer = new RustLexer(inputStream);
-const tokenStream = new CommonTokenStream(lexer);
-const parser = new RustParser(tokenStream);
+export let LOGGING_ENABLED = false;
 
-// Parse the input
-const tree = parser.crate();
-console.log(tree.toStringTree(parser));
+const test_typechecker = (code: string, expected_error: string, enable_log?: boolean) => {
 
-// Typechecker
-const type_checker = new RustTypeChecker();
-const type_result = type_checker.check(tree)
-console.log(type_result)
+    if (enable_log) {
+        LOGGING_ENABLED = true;
+        console.log(`Enable logging for test case: ${code}`)
 
-// Compile
-const compiler = new RustCompiler();
-// const instructions = compiler.compile(tree);
+        console.log(`Start of log....`)
 
-// console.log(instructions);
+        const inputStream = CharStream.fromString(code);
+        const lexer = new RustLexer(inputStream);
+        const tokenStream = new CommonTokenStream(lexer);
+        const parser = new RustParser(tokenStream);
 
+        // Parse the input
+        const tree = parser.crate();
+        
+        // Typechecker
+        const typeChecker = new RustTypeChecker();
+        typeChecker.check(tree);
+
+        console.log(`...End of log.\n\n`)
+
+        LOGGING_ENABLED = false;
+        return; // terminate 
+    }
+
+    try {
+        const inputStream = CharStream.fromString(code);
+        const lexer = new RustLexer(inputStream);
+        const tokenStream = new CommonTokenStream(lexer);
+        const parser = new RustParser(tokenStream);
+
+        // Parse the input
+        const tree = parser.crate();
+        
+        // Typechecker
+        const typeChecker = new RustTypeChecker();
+        typeChecker.check(tree);
+
+        // If we get here and expected_error is empty, test passes
+        if (expected_error === "") {
+            console.log(`✅ Test Pass: ${code}`);
+        } else {
+            console.error(`❌ Test Fail: ${code}\nExpected error: "${expected_error}"\nBut no error was thrown\n`);
+        }
+
+    } catch (error) {
+        // If we catch an error but expected no error, test fails
+        if (expected_error === "") {
+            console.error(`❌ Test Fail: ${code}\nExpected no errors, but got:\n${error.message}\n`);
+        } else if (error.message.includes(expected_error)) {
+            // If we catch an error and it matches expected error, test passes
+            console.log(`✅ Test Pass: ${code}\n`);
+        } else {
+            // If we catch an error but it doesn't match expected error, test fails
+            console.error(`❌ Test Fail: ${code}\nExpected error: "${expected_error}"\nActual error: "${error.message}\n"`);
+        }
+    } 
+};
+
+
+// Test cases for functions that should pass type checking
+test_typechecker(`
+fn pass1() -> i32 {
+    if (true) {
+        6
+    } else {
+        7
+    }
+}
+`, "", true); // enable log for this specific test case
+
+test_typechecker(`
+fn pass2() -> i32 {
+    if (true) {
+        6;
+    } else {
+        7;
+    }
+    return 1;
+}
+`, "");
+
+test_typechecker(`
+fn pass3() -> i32 {
+    if (true) {
+        return 6;
+    } else {
+        return 7;
+    }
+}
+
+fn pass3_1() -> i32 {
+    let mut x: i32 = pass3();
+    x = pass3() + 1;
+    x = pass3() + pass3() + x;
+    let mut y: i32 = pass3() + pass3();
+    y = y + x;
+    let TEST: i32 = 100;
+    {
+        let z: i32 = TEST;
+    }
+    return y;
+}
+`, "");
+
+test_typechecker(`
+fn pass4() -> i32 {
+    fn f8() -> bool {
+        return false;
+    }
+    if (true) {
+        if (true) {
+            return 4;
+        } else {
+            return 5;
+        }
+    } else if (true) {
+        return 6;
+    } else {
+        return 7;
+    }
+    return 111111;
+}
+`, "");
+
+test_typechecker(`
+fn pass5() -> i32 {
+    let mut x: i32 = if (true) { 6 } else { 7 };
+    return x;
+}
+`, "");
+
+test_typechecker(`
+fn pass6() -> i32 {
+    let mut y: i32 = return 6; // allow due to early termination
+}
+`, "");
+
+test_typechecker(`
+fn pass_ref_1() -> () {
+    let x : i32 = 42;
+    let x_ref : &i32 = &x;
+    let x_ref_2 : &i32 = x_ref;
+    *x_ref_2; 
+}
+`, "");
+
+test_typechecker(`
+fn pass_deref_assign() {
+    let mut x: i32 = 42;
+    let x_ref: &mut i32 = &mut x;
+    *x_ref = 69;
+    ((*x_ref)) = 69;
+}
+`, "");
+
+// Test cases for functions that should fail type checking
+test_typechecker(`
+fn fail1() -> i32 {
+    if (true) {
+        return 6;
+    } else {
+        7
+    }
+}
+`, "Type error; Types of branches not matching; consequent type: retType<i32>, alternative type: i32");
+
+// Mismatched branch types (unit vs return)
+test_typechecker(`
+fn fail2() -> i32 {
+    if (true) {
+        6;
+    } else {
+        return 7;
+    }
+    return 1;
+}
+`, "Type error; Types of branches not matching; consequent type: (), alternative type: retType<i32>");
+
+// Return type mismatch (bool vs i32)
+test_typechecker(`
+fn fail3() -> i32 {
+    if (true) {
+        return false;
+    } else {
+        return 7;
+    }
+    return 1;
+}
+`, "Type error in return statement; expected type: i32, actual type: bool");
+
+// Return type mismatch with implicit unit
+test_typechecker(`
+fn fail4() -> i32 {
+    if (true) {
+        return false
+    } else {
+        7;
+    }
+    return 1;
+}
+`, "Type error in return statement; expected type: i32, actual type: bool");
+
+// Use of moved reference
+test_typechecker(`
+fn fail_ref_1() -> () {
+let x : i32 = 2;
+let x_ref : &i32 = &x;
+let x_ref_2 : &i32 = x_ref;
+*x_ref;
+}
+`, "Type error in pathExpression; use of a moved value: x_ref");
+
+// Assignment to immutable reference
+test_typechecker(`
+fn fail_deref_assign() {
+    let mut x: i32 = 42;
+    let x_ref: &i32 = &x;
+    *x_ref = 69;
+    ((*x_ref)) = 69;
+}
+`, "Type error in assignment; cannot assign to a dereference of an immutable reference");
+
+
+const test_compilier = (code: string) => {
+    const inputStream = CharStream.fromString(code);
+    const lexer = new RustLexer(inputStream);
+    const tokenStream = new CommonTokenStream(lexer);
+    const parser = new RustParser(tokenStream);
+
+    // Parse the input
+    const tree = parser.crate();
+    console.log(tree.toStringTree(parser));
+
+    const compiler = new RustCompiler();
+    const instructions = compiler.compile(tree);
+    printInstructions(instructions);
+}
+
+// Helper function to print out the instructions
 function printInstructions(instrs: object[]): undefined {
     const formattedInstructions = instrs
         .map((obj, index) => `${index}: ${JSON.stringify(obj)}`)
@@ -237,7 +460,6 @@ function printInstructions(instrs: object[]): undefined {
     console.log(formattedInstructions);
 }
 
-// printInstructions(instructions);
 
 /*
 function main() {
