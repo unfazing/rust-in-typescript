@@ -1006,22 +1006,22 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // show warning that lifetime of resulting reference is not guaranteed to be valid
     visitFunction_(ctx: Function_Context): Type {
 
-        // look up function name (symbol) from type environment instead 
-        // for sanity check + prevent accessing null property
+        // read type declarations for the function
         const symbol: string = this.visit(ctx.identifier());
-        const fun_type: Type = te.lookup_type(symbol); 
+        const expected_param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : [];
+        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType();
+        const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
+        
+        // add symbol binding to type environment
+        te.add_symbol_to_current_frame(symbol, fun_type);
 
-        if (!(fun_type instanceof ClosureType)) {
-            print_error("Function type must be of closure type.");
-            return new UnitType();
-        }
+        // extend the environment to store type mapping for parameters
+        te.extend_type_environment(IS_FUNCTIONTYPEFRAME)
 
-        const expected_return_type: Type = fun_type.ReturnType;
-        returnTypeStack = push(returnTypeStack, expected_return_type); // push the return type of the function to the stack
-        const param_types: Type[] = fun_type.ParamTypes;
-
-        const param_names: string[] = []
-        let arity = param_types.length;
+        // push the return type of the function to the stack
+        returnTypeStack = push(returnTypeStack, expected_return_type); 
+        
+        let arity = expected_param_types.length;
         log(`ARITY: ${arity}`, "FUNCTION_")
         for (let i = 0; i < arity; i++) {
             const function_param = ctx.functionParameters().functionParam(i);
@@ -1031,16 +1031,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 return new UnitType();
             }
 
-            const [is_mut, parameter_name]: [boolean, string] = this.visit(function_param.functionParamPattern().pattern()); // enters visitIdentifierPattern()!!
+            // enters visitIdentifierPattern()! returns a pair 
+            const [_, parameter_sym]: [boolean, string] = this.visit(function_param.functionParamPattern().pattern()); 
             
-            param_types[i].Mutable = is_mut;  // modify property of parameter type
-            param_names.push(parameter_name); 
+            // add symbol mapping to current function frame
+            te.add_symbol_to_current_frame(parameter_sym, expected_param_types[i]);
         }
-        log(`PARAM LIST: ${param_names}, PARAM TYPES: ${param_types.map(x => unparse_type(x))}`, "FUNCTION_")
-
-        // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
-        te.extend_type_environment(IS_FUNCTIONTYPEFRAME)
-        // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "FUNCTION_");
+        log(`PARAM TYPES: ${expected_param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
         if (ctx.blockExpression() === null) {
             print_error("Function without body!")
@@ -1080,7 +1077,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return new UnitType(); // Assume undeclared types as unit type for now to prevent runtime exception
         }
 
-        return this.visit(ctx.functionParamPattern().type_());
+        // Add mutability info 
+        const [is_mut, parameter_name]: [boolean, string] = this.visit(ctx.functionParamPattern().pattern()); // enters visitIdentifierPattern()!!
+        const type: Type = this.visit(ctx.functionParamPattern().type_());
+        type.Mutable = is_mut;
+
+        return type;
     }
 
     // RARROW type_
@@ -1168,7 +1170,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         te.add_symbol_to_current_frame(symbol, actual_type);
 
         // NATHAN: Should we allow reassignment of symbol?
-        // if we do, we open a can of worms (check variable shadowing)
+        // I think we should. This is know as variable shadowing.
         
         return new UnitType(); // statements produce undefined
     }
