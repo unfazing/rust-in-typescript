@@ -422,52 +422,49 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // (AND | ANDAND) KW_MUT? expression
     visitBorrowExpression(ctx: BorrowExpressionContext): Type {
-        const is_mut: boolean = (ctx.KW_MUT() != null)
+        const is_mut_borrow: boolean = (ctx.KW_MUT() != null)
         const inner_type: Type = this.visit(ctx.expression());
-        let symbol: string
-        log(`BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "BORROW_EXPRESSION");
+
+        log(`${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}`, "BORROW_EXPRESSION");
         
         if (inner_type instanceof ClosureType) {
             print_or_throw_error(`Type error in borrow expression; cannot borrow a closure: ${unparse_type(inner_type)}`);            
         }
     
-        // A borrow of a variable is happening. e.g. let y = &x; (as opposed to let y = &String::from("1");)
-        if (ctx.expression() instanceof PathExpression_Context) {
-            symbol = this.visitChildren(ctx.expression().getChild(0)) // skip PathExpression node to get identifier (no identifierPattern)
-            log(`AN ${is_mut ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED ON: ${symbol}`, "BORROW_EXPRESSION");
-            if (is_mut && !inner_type.Mutable) {
-                print_or_throw_error(`Type error in borrow expression; cannot borrow ${symbol} as mutable, as it is not declared as mutable.`);
-            }
-            let borrowedType: Type = te.lookup_type(symbol)
+        // A borrow of a variable is happening. e.g. let y = &x;
+        log(`AN ${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED.`, "BORROW_EXPRESSION");
 
-            if (borrowedType === undefined) {
-                print_or_throw_error(`Cannot find symbol ${symbol} in this scope.`)
-            }
+        // if we are borrowing from temporary type: let y = &String::from("1");
+        // allow mutable borrow even without mut keyword: let y = &mut String::from("1");
+        if ( (!inner_type.IsTemporary) && (is_mut_borrow && !inner_type.IsMutable) ) {
+            print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow to an immutable variable.`);
+        
+        } else if (inner_type.MutableBorrowExists) {
+            print_or_throw_error(`Type error in borrow expression; cannot borrow because owner already has a mutable borrow.`);
 
-            if (borrowedType.MutableBorrowExists) {
-                print_or_throw_error(`Type error in borrow expression; cannot borrow ${symbol}, as it already has a mutable borrow.`);
-            }
+        } else if (inner_type.ImmutableBorrowCount > 0 && is_mut_borrow) {
+            print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow because owner already has an immutable borrow.`);
+        
+        } else {
 
-            if (borrowedType.ImmutableBorrowCount > 0 && is_mut) {
-                print_or_throw_error(`Type error in borrow expression; cannot borrow ${symbol} as mutable, as it already has an immutable borrow.`);
-            }
-
-            if (is_mut) {
-                borrowedType.MutableBorrowExists = true;
+            // update borrow state of inner type
+            if (is_mut_borrow) {
+                inner_type.MutableBorrowExists = true;
             } else {
-                borrowedType.ImmutableBorrowCount++;
+                inner_type.ImmutableBorrowCount++;
             }
+
         }
 
         if (ctx.AND()) {
-            return is_mut ? new MutableRefType(inner_type, symbol) : new ImmutableRefType(inner_type, symbol)
+            return is_mut_borrow ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
         }
 
         // TODO: Check if it is okay to ignore nestedness in updating variable's borrow status
         // e.g. on the type environment, let y = &x; vs let y = &&x; both simply adds an immutable borrow x. 
         if (ctx.ANDAND()) {
-            let inner_ref_type: RefType = is_mut ? new MutableRefType(inner_type, symbol) : new ImmutableRefType(inner_type, symbol)
-            let outer_ref_type: RefType = new ImmutableRefType(inner_ref_type, symbol);
+            let inner_ref_type: RefType = is_mut_borrow ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
+            let outer_ref_type: RefType = new ImmutableRefType(inner_ref_type);
             return outer_ref_type;
         }
     }
@@ -483,7 +480,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         log(`FOUND INNER TYPE: ${unparse_type(expr_type.InnerType)}`, "DEREFERENCE_EXPRESSION");
-        return expr_type.InnerType; // question: do we miss any info about the type mutability?
+        return expr_type.InnerType; // question: do we miss any info about the type mutability? a temporary object has IsMutable = false by default;
     }
 
     // LPAREN innerAttribute* tupleElements? RPAREN
@@ -563,7 +560,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const expected_type: Type = this.visit(LHS); 
         const actual_type: Type = this.visit(RHS);
 
-        if (!expected_type.Mutable) {
+        if (!expected_type.IsTemporary && !expected_type.IsMutable) {
             print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.')
         }
         
@@ -596,14 +593,15 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // An assignment that moves ownership of a variable is happening.
         // Function types cannot be moved.
-        if (!(expected_type instanceof ClosureType)) {
+        if (!(actual_type instanceof ClosureType)) {
             
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`);
+            } else {
+                actual_type.IsMoved = true;
+                log(`MARKING RHS AS MOVED`, "ASSIGNMENT_EXPRESSION");
             }
-            
-            actual_type.IsMoved = true;
-            log(`MARKING RHS AS MOVED`, "ASSIGNMENT_EXPRESSION");
+
         }
 
         return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
@@ -895,7 +893,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // CRUCIAL: if mutable reference type, the inner type must be mutable as well.
         // This invariant will be checked again in visitBorrowExpression() 
-        inner_type.Mutable = is_mut; 
+        inner_type.IsMutable = is_mut; 
 
         log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
 
@@ -1039,7 +1037,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // Add mutability info 
         const [is_mut, parameter_name]: [boolean, string] = this.visit(ctx.functionParamPattern().pattern()); // enters visitIdentifierPattern()!!
         const type: Type = this.visit(ctx.functionParamPattern().type_());
-        type.Mutable = is_mut;
+        type.IsMutable = is_mut;
 
         return type;
     }
@@ -1091,7 +1089,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
     
         let expected_type: Type = this.visit(ctx.type_());
-        expected_type.Mutable = is_mut;
+        expected_type.IsMutable = is_mut;
 
         // either  
         // 1. literal expression, arithmeticExpression, comparisonExpression...

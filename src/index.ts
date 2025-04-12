@@ -263,7 +263,7 @@ const test_typechecker = (code: string, expected_error: string, enable_log?: boo
             console.error(`❌ Test Fail: ${code}\nExpected no errors, but got:\n${error.message}\n`);
         } else if (error.message.includes(expected_error)) {
             // If we catch an error and it matches expected error, test passes
-            console.log(`✅ Test Pass: ${code}\n`);
+            console.log(`✅ Test Pass: ${code}`);
         } else {
             // If we catch an error but it doesn't match expected error, test fails
             console.error(`❌ Test Fail: ${code}\nExpected error: "${expected_error}"\nActual error: "${error.message}\n"`);
@@ -460,6 +460,37 @@ fn pass_lookup_scope() {
     funky();
 }
 `, "")
+
+test_typechecker(`
+fn pass_create_borrow_using_deref() {
+    let x: i32 = 42;
+    let x_ref: &i32 = &x;
+    let x_ref_2: &i32 = &(*x_ref);
+}
+`, "")
+
+test_typechecker(`
+fn pass_create_immutable_borrow_to_temp_var() {
+    let x_ref: &i32 = &42;
+    let x_ref_2: &i32 = &(*x_ref); // allowed in Rust
+}
+`, "")
+
+test_typechecker(`
+fn fail_create_mutable_borrow_to_temp_var() {
+    let x_ref: &i32 = &42;
+    let x_ref_2: &mut i32 = &mut (*x_ref); // another immutable borrow alr exists, throw error
+
+    // mfking Rust allows this due to some reborrowing bs (https://haibane-tenshi.github.io/rust-reborrowing/)
+}
+`, "cannot create a mutable borrow because owner already has an immutable borrow") 
+
+test_typechecker(`
+fn pass_deref_then_assign_to_temp_var() {
+    let x_ref: &mut i32 = &mut 42; // notice temp 42 is not mutable
+    *x_ref = 69;
+}
+`, "") 
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);

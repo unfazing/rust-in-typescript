@@ -104,6 +104,9 @@ export class TypeEnvironment {
     add_symbol_to_current_frame(symbol: string, type: Type) {
         const current_frame = this.peek();
         current_frame.add_variable(symbol, type);
+
+        // once a type is added to the environment, it is no longer temporary
+        type.IsTemporary = false;
     }
 
 }
@@ -162,14 +165,16 @@ export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "return
 // Otherwise, t.Mutable can be 'undefined' e.g. 3; --> <ScalarType>.Mutable = undefined
 export abstract class Type {
     TypeName: TypeName
-    Mutable: boolean
+    IsMutable: boolean
     IsMoved: boolean
+    IsTemporary: boolean
     MutableBorrowExists: boolean
     ImmutableBorrowCount: number
 
     constructor() {
-        this.Mutable = false
+        this.IsMutable = false
         this.IsMoved = false
+        this.IsTemporary = true
         this.MutableBorrowExists = false
         this.ImmutableBorrowCount = 0
     }
@@ -178,7 +183,7 @@ export abstract class Type {
 export class ScalarType extends Type {
     constructor(typeName: ScalarTypeName, is_mut?: boolean) {
         super()
-        this.Mutable = is_mut
+        this.IsMutable = is_mut
         this.TypeName = typeName
     }
 }
@@ -186,7 +191,7 @@ export class ScalarType extends Type {
 export class UnitType extends Type {
     constructor(is_mut?: boolean) {
         super();
-        this.Mutable = is_mut;
+        this.IsMutable = is_mut;
         this.TypeName = "unit";
     }
 }
@@ -216,7 +221,7 @@ export class ImmutableRefType extends RefType {
         super()
         this.InnerType = innerType
         this.OriginalSymbol = originalSymbol
-        this.Mutable = is_mut
+        this.IsMutable = is_mut
     }
 }
 
@@ -225,7 +230,7 @@ export class MutableRefType extends RefType {
         super()
         this.InnerType = innerType
         this.OriginalSymbol = originalSymbol
-        this.Mutable = is_mut
+        this.IsMutable = is_mut
     }
 }
 
@@ -234,7 +239,7 @@ export class ReturnType extends Type {
     constructor(returnedType: Type, is_mut?: boolean) {
         super()
         this.ReturnedType = returnedType
-        this.Mutable = is_mut
+        this.IsMutable = is_mut
         this.TypeName = "returnType"
     }  
 }
