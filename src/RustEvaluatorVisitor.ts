@@ -239,29 +239,9 @@ let ce = global_compile_environment;
 
 const LOGGING_ENABLED = true; // Set to false to disable logging
 
-const FUNCTIONS_LOGGING = {
-    "CRATE": true,
-    "LITERAL_EXPRESSION": true,
-    "PATH_EXPRESSION": true,
-    "LET_STATEMENT": true,
-    "CONSTANT_ITEM": true,
-    "ASSIGNMENT_EXPRESSION": true,
-    "IDENTIFIER_PATTERN": true,
-    "BLOCK_EXPRESSION": true,
-    "FUNCTION": true,
-    "FUNCTION->CLOSURE": true,
-    "RETURN_EXPRESSION": true,
-    "CALL_EXPRESSION": true,
-    "ARITHMETIC_OR_LOGICAL_EXPRESSION": true,
-    "COMPARISON_EXPRESSION": true,
-    "LAZY_BOOLEAN_EXPRESSION": true,
-}
-
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
-        if (FUNCTIONS_LOGGING[enclosing_function]) {
-            console.log(`[${enclosing_function}] --- ${message}`);
-        }
+        console.log(`[${enclosing_function}] --- ${message}`);
     }
 }
 
@@ -339,75 +319,18 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         return symbol
     }
 
-    // TODO: MUST ASSIGN VALUE TO VARIABLE?
-    // letStatement
-    // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
-    // ;
-    visitLetStatement (ctx: LetStatementContext): String {
-        let symbol = this.visit(ctx.patternNoTopAlt())
-        let expr = this.visit(ctx.expression())
-        log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
-        log(`EXPR: ${expr}`, "LET_STATEMENT")
-        
-        if (symbol.startsWith("mut ")) {
-            instrs[wc++] = {
-                tag: "MUT_ASSIGN", // mutable assign
-                pos: compile_time_environment_position(ce, symbol.substring(4)),
-            };
-        } else {
-            instrs[wc++] = {
-                tag: "ASSIGN", // immutable assign
-                pos: compile_time_environment_position(ce, symbol),
-            };
-        }
-        return symbol;
-    }
-
-    // constantItem
-    // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
-    // ;
-    visitConstantItem(ctx: ConstantItemContext): undefined {
-        let symbol = this.visit(ctx.identifier())
-        let expr = this.visit(ctx.expression())
-        log(`SYMBOL: ${symbol}`, "CONSTANT_ITEM")
-        log(`EXPR: ${expr}`, "CONSTANT_ITEM")
-        
+    visitBorrowExpression(ctx: BorrowExpressionContext): undefined {
+        this.visit(ctx.expression())
         instrs[wc++] = {
-            tag: "ASSIGN", // immutable assign
-            pos: compile_time_environment_position(ce, symbol),
-        };
-    }
-
-
-    // expression EQ expression
-    visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
-        let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
-        log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
-        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
-        
-        log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
-        
-        instrs[wc++] = {
-            tag: "ASSIGN", // immutable assign
-            pos: compile_time_environment_position(ce, symbol),
-        };
-    }
-
-    // identifierPattern
-    // : KW_REF? KW_MUT? identifier (AT pattern)?
-    // ;
-    visitIdentifierPattern(ctx: IdentifierPatternContext): String {
-        if (ctx.KW_MUT() != null) {
-            // pass mutability information up to LetStatement
-            log(`FOUND MUT ${ctx.identifier().getText()}`, "IDENTIFIER_PATTERN")
-            return "mut " + ctx.identifier().getText(); // append "mut" + whitespace to identifier
-        } else {
-            return ctx.identifier().getText();
+            tag: "REF",
         }
     }
 
-    visitIdentifier(ctx: IdentifierContext): String {
-        return ctx.getText();
+    visitDereferenceExpression(ctx: DereferenceExpressionContext): undefined {
+        this.visit(ctx.expression())
+        instrs[wc++] = {
+            tag: "DEREF",
+        }
     }
 
     // blockExpression
@@ -468,45 +391,18 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         ce = compile_time_environment_restore(ce);
     }
 
-    // function_
-    // : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
-    //     blockExpression
-    //     | SEMI
-    // )
-    // ;
-    visitFunction_ (ctx: Function_Context): undefined {
-        let symbol = this.visit(ctx.identifier())
-        let params = ctx.functionParameters()
-        let body = ctx.blockExpression()
-        log(`SYMBOL: ${symbol}`, "FUNCTION")
-        this.insertClosure(params, body)
+    // expression EQ expression
+    visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
+        let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
+        log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
+        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
+        
+        log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
+        
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
-    }
-
-    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
-        log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
-        let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
-        instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
-        const goto_instruction = { tag: "GOTO", addr: -1 }
-        instrs[wc++] = goto_instruction
-        let param_list =  []
-        for (let i = 0; i < arity; i++) {
-            param_list.push(this.visit(params_ctx.functionParam(i).functionParamPattern().pattern()))
-        }
-        log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
-        ce = compile_time_environment_extend(param_list, ce)
-
-        // compile body into instructions
-        this.visit(body_ctx) // the environment will be extended and restored once more => done twice
-        
-        ce = compile_time_environment_restore(ce);
-        instrs[wc++] = { tag: "LDC", val: undefined}
-        instrs[wc++] = { tag: "RESET" }
-        goto_instruction.addr = wc
-        log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
     }
 
     // KW_RETURN expression?
@@ -678,6 +574,107 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
 		instrs[wc++] = { tag: "LDC", val: undefined }; // while loops always have the unit type () in Rust!!
     }
+
+    // function_
+    // : functionQualifiers KW_FN identifier genericParams? LPAREN functionParameters? RPAREN functionReturnType? whereClause? (
+    //     blockExpression
+    //     | SEMI
+    // )
+    // ;
+    visitFunction_ (ctx: Function_Context): undefined {
+        let symbol = this.visit(ctx.identifier())
+        let params = ctx.functionParameters()
+        let body = ctx.blockExpression()
+        log(`SYMBOL: ${symbol}`, "FUNCTION")
+        this.insertClosure(params, body)
+        instrs[wc++] = {
+            tag: "ASSIGN", // immutable assign
+            pos: compile_time_environment_position(ce, symbol),
+        };
+    }
+
+
+    insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
+        log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
+        let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
+        instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
+        const goto_instruction = { tag: "GOTO", addr: -1 }
+        instrs[wc++] = goto_instruction
+        let param_list =  []
+        for (let i = 0; i < arity; i++) {
+            param_list.push(this.visit(params_ctx.functionParam(i).functionParamPattern().pattern()))
+        }
+        log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
+        ce = compile_time_environment_extend(param_list, ce)
+
+        // compile body into instructions
+        this.visit(body_ctx) // the environment will be extended and restored once more => done twice
+        
+        ce = compile_time_environment_restore(ce);
+        instrs[wc++] = { tag: "LDC", val: undefined}
+        instrs[wc++] = { tag: "RESET" }
+        goto_instruction.addr = wc
+        log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
+    }
+
+
+    // TODO: MUST ASSIGN VALUE TO VARIABLE?
+    // letStatement
+    // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
+    // ;
+    visitLetStatement (ctx: LetStatementContext): String {
+        let symbol = this.visit(ctx.patternNoTopAlt())
+        let expr = this.visit(ctx.expression())
+        log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
+        log(`EXPR: ${expr}`, "LET_STATEMENT")
+        
+        if (symbol.startsWith("mut ")) {
+            instrs[wc++] = {
+                tag: "MUT_ASSIGN", // mutable assign
+                pos: compile_time_environment_position(ce, symbol.substring(4)),
+            };
+        } else {
+            instrs[wc++] = {
+                tag: "ASSIGN", // immutable assign
+                pos: compile_time_environment_position(ce, symbol),
+            };
+        }
+        return symbol;
+    }
+
+    // constantItem
+    // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
+    // ;
+    visitConstantItem(ctx: ConstantItemContext): undefined {
+        let symbol = this.visit(ctx.identifier())
+        let expr = this.visit(ctx.expression())
+        log(`SYMBOL: ${symbol}`, "CONSTANT_ITEM")
+        log(`EXPR: ${expr}`, "CONSTANT_ITEM")
+        
+        instrs[wc++] = {
+            tag: "ASSIGN", // immutable assign
+            pos: compile_time_environment_position(ce, symbol),
+        };
+    }
+
+    // identifierPattern
+    // : KW_REF? KW_MUT? identifier (AT pattern)?
+    // ;
+    visitIdentifierPattern(ctx: IdentifierPatternContext): String {
+        if (ctx.KW_MUT() != null) {
+            // pass mutability information up to LetStatement
+            log(`FOUND MUT ${ctx.identifier().getText()}`, "IDENTIFIER_PATTERN")
+            return "mut " + ctx.identifier().getText(); // append "mut" + whitespace to identifier
+        } else {
+            return ctx.identifier().getText();
+        }
+    }
+
+    visitIdentifier(ctx: IdentifierContext): String {
+        return ctx.getText();
+    }
+
+
 
     // Override the default result method from AbstractParseTreeVisitor
     protected defaultResult(): String {

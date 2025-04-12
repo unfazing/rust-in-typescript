@@ -1,6 +1,6 @@
 // Solution by Wu Xiaoyun, AY2023/24
 
-import { error } from "console";
+import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./RustCompileTimeEnv";
 import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
 
@@ -189,6 +189,7 @@ const Environment_tag = 10;
 const Pair_tag = 11;
 const Builtin_tag = 12;
 const String_tag = 13; // ADDED CHANGE
+const Reference_tag = 14;
 
 // Record<string, tuple(number, string)< where the key is the hash of the string
 // and the value is a tuple of the address of the string and the string itself
@@ -432,6 +433,7 @@ const heap_allocate_Pair = (hd, tl) => {
 	return pair_address;
 };
 
+
 const is_Pair = (address) => heap_get_tag(address) === Pair_tag;
 
 // number
@@ -447,6 +449,25 @@ const heap_allocate_Number = (n) => {
 };
 
 const is_Number = (address) => heap_get_tag(address) === Number_tag;
+
+
+// reference
+// [1 byte tag, 4 bytes, unused,
+//  2 bytes #children, 1 byte unused]
+// followed by the address of the underlying value
+// then the address of referenced variable
+const heap_allocate_Reference = (address) => {
+	const reference_address = heap_allocate(Number_tag, 2);
+	heap_set(reference_address + 1, heap_get(address)) // underlying value
+	heap_set(reference_address + 2, address); // referenced variable
+	return reference_address;
+}
+
+const heap_get_underlying_value = (address) => heap_get(address + 1);
+const heap_get_referenced_variable = (address) => heap_get(address + 2);
+
+
+const is_Reference = (address) => heap_get_tag(address) === Reference_tag;
 
 //
 // conversions between addresses and JS_value
@@ -476,6 +497,8 @@ const address_to_JS_value = (x) =>
 		? "<closure>"
 		: is_Builtin(x)
 		? "<builtin>"
+		: is_Reference(x)
+		? "<reference>" // TODO: check if this is right
 		: "unknown word tag: " + word_to_string(x);
 
 const JS_value_to_address = (x) =>
@@ -527,62 +550,20 @@ const JS_value_to_address = (x) =>
 
 // Supported binops: [&&, ||, &, |, -, %, +, /, *, ^, ===, >=, >, <=, <, !==]
 const binop_microcode = {
-    "&&": (x, y) =>
-        is_boolean(x) && is_boolean(y)
-            ? x && y
-            : error([x, y], "&& expects two boolean values, got:"),
-    "||": (x, y) =>
-        is_boolean(x) && is_boolean(y)
-            ? x || y
-            : error([x, y], "|| expects two boolean values, got:"),
-    "&": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x & y
-            : error([x, y], "& expects two numbers, got:"),
-    "|": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x | y
-            : error([x, y], "| expects two numbers, got:"),
-    "^": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x ^ y
-            : error([x, y], "^ expects two numbers, got:"),
-    "+": (x, y) =>
-        (is_number(x) && is_number(y)) || (is_string(x) && is_string(y))
-            ? x + y
-            : error([x, y], "+ expects two numbers or two strings, got:"),
-    "*": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x * y
-            : error([x, y], "* expects two numbers, got:"),
-    "-": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x - y
-            : error([x, y], "- expects two numbers, got:"),
-    "/": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x / y
-            : error([x, y], "/ expects two numbers, got:"),
-    "%": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x % y
-            : error([x, y], "% expects two numbers, got:"),
-    "<": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x < y
-            : error([x, y], "< expects two numbers, got:"),
-    "<=": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x <= y
-            : error([x, y], "<= expects two numbers, got:"),
-    ">=": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x >= y
-            : error([x, y], ">= expects two numbers, got:"),
-    ">": (x, y) =>
-        is_number(x) && is_number(y)
-            ? x > y
-            : error([x, y], "> expects two numbers, got:"),
+    "&&": (x, y) => x && y,
+    "||": (x, y) => x || y,
+    "&": (x, y) => x & y,
+    "|": (x, y) => x | y,
+    "^": (x, y) => x ^ y,
+    "+": (x, y) => x + y,
+    "*": (x, y) => x * y,
+    "-": (x, y) => x - y,
+    "/": (x, y) => x / y,
+    "%": (x, y) => x % y,
+    "<": (x, y) => x < y,
+    "<=": (x, y) => x <= y,
+    ">=": (x, y) => x >= y,
+    ">": (x, y) => x > y,
     "===": (x, y) => x === y,
     "!==": (x, y) => x !== y, 
 };
@@ -702,6 +683,17 @@ const microcode = {
 			heap_get_Closure_environment(fun),
 		);
 		PC = heap_get_Closure_pc(fun);
+	},
+	REF: (instr) => {
+		const referenced_var = OS.pop()
+		const reference_address = heap_allocate_Reference(referenced_var);
+		push(OS, reference_address);
+	},
+	DEREF: (instr) => {
+		const reference_address = OS.pop();
+		assert(is_Reference(reference_address), "Dereferencing a non-reference");;
+		const underlying_value = heap_get_underlying_value(reference_address);
+		push(OS, underlying_value);
 	},
 	RESET: (instr) => {
 		PC--;
