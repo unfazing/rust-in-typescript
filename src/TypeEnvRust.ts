@@ -110,6 +110,7 @@ export class TypeEnvironment {
 
 export abstract class TypeFrame {
     frame: {[key:string]: Type}
+    
     constructor() {
         this.frame = {}
     }
@@ -239,10 +240,9 @@ export class ReturnType extends Type {
 }
 
 export const compare_type = (t1: Type, t2: Type): boolean => {
-    // typeof only returns primitive types and objects...
+
     if (!(t1 instanceof Type) || !(t2 instanceof Type)) {
-        print_error(`[compare_type] arguments are not of class Type: ${unparse_type(t1)} and ${unparse_type(t2)}`);
-        return false;
+        throw new Error(`[compare_type] arguments are not of class Type: ${unparse_type(t1)} and ${unparse_type(t2)}`);
     }
 
     assert(!(t1.IsMoved || t2.IsMoved), `[compare_type] Should not encounter a moved type during type comparison.`);
@@ -302,6 +302,15 @@ export const compare_types = (ts1: Type[], ts2: Type[]): boolean => {
 };
 
 export const unparse_type = (t: Type): string => {
+
+    if (t === undefined) {
+        throw new Error(`[unparse_type] Cannot unparse undefined value.`)
+    }
+
+    if (!(t instanceof Type)) {
+        throw new Error(`[unparse_type] ${JSON.stringify(t)} is not an instance of Type. }`);
+    }
+
     // Get borrow status
     // Returns "_&mut" if mutable borrow exists
     // Returns "_&_<n>" where n is the number of immutable borrows if immutable borrow exists
@@ -350,10 +359,6 @@ export const unparse_type = (t: Type): string => {
     if (t instanceof ReturnType) {
         return moved_str + `retType<${unparse_type(t.ReturnedType)}>${borrow_str}`
     }
-    
-    if (t === undefined) {
-        print_error(`[unparse_type] Cannot unparse undefined value: ${JSON.stringify(t)}`)
-    }
 
-    print_error(`[unparse_type] Unknown type of ${JSON.stringify(t)}`);
+    throw new Error(`[unparse_type] Unknown type of ${JSON.stringify(t)}`);
 };

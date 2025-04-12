@@ -435,6 +435,31 @@ fn fail_deref_assign() {
 }
 `, "Type error in assignment; cannot assign to a dereference of an immutable reference");
 
+test_typechecker(`
+fn fail_lookup_scope() {
+    let x: i32 = 42;
+
+    fn funky() -> i32 {
+        return x; // cannot access dynamic variable outside of fn scope
+    }
+
+    funky();
+}
+`, "Cannot find symbol")
+
+test_typechecker(`
+fn pass_lookup_scope() {
+    let x: i32 = 42;
+
+    fn filthy() {}
+
+    fn funky() {
+        filthy(); // can access function names outside of scope
+    }
+
+    funky();
+}
+`, "")
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);

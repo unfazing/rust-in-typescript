@@ -230,6 +230,7 @@ import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
 import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
 import { LOGGING_ENABLED } from "./index.js";
+import { error } from "console";
 
 export class RustTypeChecker {
     private root: ParseTree;
@@ -243,8 +244,6 @@ export class RustTypeChecker {
         this.visitor.visit(tree);
     }
 }
-
-// let LOGGING_ENABLED = false; // Set to false to disable logging
 
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
@@ -403,7 +402,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // leaf node: returns the type of the symbol (by looking up type env)
     visitPathExpression(ctx: PathExpressionContext): Type {
         const symbol = this.visitChildren(ctx)
-        const type: Type = te.lookup_type(symbol)
+        const type: Type = te.lookup_type(symbol) 
+
+        if (type === undefined) {
+            print_or_throw_error(`Cannot find symbol ${symbol} in this scope.`)
+        }
+
         if (type.IsMoved) {
             print_or_throw_error(`Type error in pathExpression; use of a moved value: ${symbol}`)
         }
@@ -435,6 +439,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 print_or_throw_error(`Type error in borrow expression; cannot borrow ${symbol} as mutable, as it is not declared as mutable.`);
             }
             let borrowedType: Type = te.lookup_type(symbol)
+
+            if (borrowedType === undefined) {
+                print_or_throw_error(`Cannot find symbol ${symbol} in this scope.`)
+            }
 
             if (borrowedType.MutableBorrowExists) {
                 print_or_throw_error(`Type error in borrow expression; cannot borrow ${symbol}, as it already has a mutable borrow.`);
