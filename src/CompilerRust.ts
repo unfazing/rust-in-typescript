@@ -231,7 +231,7 @@ import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
 import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './CompileTimeEnvRust.js';
 import { error } from 'console';
-import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType } from './Utils.js';
+import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType, UnitRustType } from './Utils.js';
 
 export class RustCompiler {
     private visitor: RustEvaluatorVisitor;
@@ -313,7 +313,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                     ? new BooleanRustType(true)
                     : error("Literal has format of an unknown type.")
         
-        instrs[wc++] = { tag: "LDC", val: val } // TODO: cast the val to the actual type in typescript instead of string
+        instrs[wc++] = { tag: "LDC", val: val } 
         
         
         
@@ -352,7 +352,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // ;
     visitBlockExpression (ctx: BlockExpressionContext): undefined {
         if (ctx.statements() == null) {
-            instrs[wc++] = { tag: "LDC", val: undefined }
+            instrs[wc++] = { tag: "LDC", val: new UnitRustType() }
             return;
         }
         
@@ -586,7 +586,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 		instrs[wc++] = { tag: "GOTO", addr: loop_start };
         jump_on_false_instruction.addr = wc;
 
-		instrs[wc++] = { tag: "LDC", val: undefined }; // while loops always have the unit type () in Rust!!
+		instrs[wc++] = { tag: "LDC", val: new UnitRustType() }; // while loops always have the unit type () in Rust!!
     }
 
     // function_
@@ -625,7 +625,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.visit(body_ctx) // the environment will be extended and restored once more => done twice
         
         ce = compile_time_environment_restore(ce);
-        instrs[wc++] = { tag: "LDC", val: undefined}
+        instrs[wc++] = { tag: "LDC", val: new UnitRustType() }
         instrs[wc++] = { tag: "RESET" }
         goto_instruction.addr = wc
         log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
