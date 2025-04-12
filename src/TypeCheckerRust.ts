@@ -227,8 +227,8 @@ import { MacroLiteralTokenContext } from "./parser/src/RustParser.js";
 import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
-import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./RustTypeEnv.js";
+import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
+import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
 import { LOGGING_ENABLED } from "./index.js";
 
 export class RustTypeChecker {

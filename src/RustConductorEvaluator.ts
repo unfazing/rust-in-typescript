@@ -3,7 +3,7 @@ import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
-import { RustCompiler } from "./RustCompiler";
+import { RustCompiler } from "./CompilerRust.js";
 
 export class RustConductorEvaluator extends BasicEvaluator {
     private executionCount: number;

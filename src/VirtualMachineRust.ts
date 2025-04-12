@@ -1,7 +1,7 @@
 // Solution by Wu Xiaoyun, AY2023/24
 
 import { assert, error } from "console";
-import { builtin_array, primitive_object } from "./RustCompileTimeEnv";
+import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
 
     

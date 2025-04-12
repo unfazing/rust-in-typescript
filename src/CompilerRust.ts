@@ -1,3 +1,4 @@
+import { ParseTree } from "antlr4ng";
 import { AbstractParseTreeVisitor } from 'antlr4ng';
 import { CrateContext, ExpressionContext } from "./parser/src/RustParser.js";
 import { MacroInvocationContext } from "./parser/src/RustParser.js";
@@ -227,10 +228,23 @@ import { MacroLiteralTokenContext } from "./parser/src/RustParser.js";
 import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
-import { RustParserVisitor } from "./parser/src/RustParserVisitor"
-import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './RustCompileTimeEnv.js';
+import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
+import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType } from './Utils.js';
+
+export class RustCompiler {
+    private visitor: RustEvaluatorVisitor;
+
+    constructor() {
+        this.visitor = new RustEvaluatorVisitor();
+    }
+
+    compile(tree: ParseTree): object[] {
+        return this.visitor.visit(tree);
+    }
+}
+
 // wc: write counter
 let wc = 0;
 // instrs: instruction array
@@ -622,7 +636,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // letStatement
     // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
     // ;
-    visitLetStatement (ctx: LetStatementContext): String {
+    visitLetStatement(ctx: LetStatementContext): String {
         let symbol = this.visit(ctx.patternNoTopAlt())
         let expr = this.visit(ctx.expression())
         log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
@@ -686,4 +700,3 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         return nextResult;
     }
 }
-

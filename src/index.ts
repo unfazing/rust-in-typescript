@@ -34,8 +34,8 @@ console.log(result)
 import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
-import { RustCompiler } from './RustCompiler.js';
-import { RustTypeChecker } from './RustTypeChecker.js';
+import { RustCompiler } from './CompilerRust.js';
+import { RustTypeChecker } from './TypeCheckerRust.js';
 
 const chunk = `
 fn main() {
@@ -435,7 +435,7 @@ fn fail_deref_assign() {
 `, "Type error in assignment; cannot assign to a dereference of an immutable reference");
 
 
-const test_compilier = (code: string) => {
+const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);
     const lexer = new RustLexer(inputStream);
     const tokenStream = new CommonTokenStream(lexer);
@@ -443,7 +443,6 @@ const test_compilier = (code: string) => {
 
     // Parse the input
     const tree = parser.crate();
-    console.log(tree.toStringTree(parser));
 
     const compiler = new RustCompiler();
     const instructions = compiler.compile(tree);
@@ -460,6 +459,42 @@ function printInstructions(instrs: object[]): undefined {
     console.log(formattedInstructions);
 }
 
+const compiler_code = `
+fn main() {
+    const TEST_CONST: i32 = 1;
+    let mut test_mut_let: i32 = 2;
+    fn test_closure(p1: i32, p2: i32) {
+        const FILLER: i32 = 11;
+        return 3;
+    }
+    test_mut_let = test_mut_let + 6;
+    test_closure(4, 5);
+
+    let mut x : i32 = 0;
+    while x < 5 {
+        x = x + 1;
+    }
+
+    if (true) {
+        1;
+    } // no else branch
+
+    fn validate(z: i32) -> bool {
+        return z >= 2;
+    }
+
+    const y : i32 = 5;
+    if (y < 2) { // comparisonExpression
+        return y;
+    } else if (validate(y)) { // functionCall + another if expression after else
+        return y;
+    } else {
+        return y;
+    }
+}
+`
+
+test_compiler(compiler_code)
 
 /*
 function main() {
