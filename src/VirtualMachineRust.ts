@@ -1,42 +1,7 @@
-// Solution by Wu Xiaoyun, AY2023/24
-
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
 
-    
-// Object.entries(require("sicp")).forEach(
-// 	([name, exported]) => (global[name] = exported),
-// );
-
-/* ***************************************************
- * Virtual machine with tagged pointers for Source §3-
- * ***************************************************/
-
-// how to run: Copy this program to your favorite
-// JavaScript development environment. Use
-// ECMAScript 2016 or higher in Node.js.
-// Import the NPM package sicp from
-// https://www.npmjs.com/package/sicp
-
-// for syntax and semantics of Source §4,
-// see https://docs.sourceacademy.org/source_4.pdf
-
-// simplifications:
-//
-// (1) every statement produces a value
-//
-// In this evaluator, all statements produce
-// a value, and declarations produce undefined,
-// whereas JavaScript distinguishes value-producing
-// statements. This makes a difference at the top
-// level, outside of function bodies. For example,
-// in JavaScript, the execution of
-// 1; const x = 2;
-// results in 1, whereas the evaluator gives undefined.
-// For details on this see:
-// https://sourceacademy.org/sicpjs/4.1.2#ex-4.8
-//
 // (2) no loops and arrays
 
 /* **********************
@@ -615,12 +580,11 @@ const global_environment = heap_Environment_extend(
  * *******/
 
 // machine registers
-let OS; // JS array (stack) of words (Addresses,
-//        word-encoded literals, numbers)
-let PC; // JS number
-let E; // heap Address
-let RTS; // JS array (stack) of Addresses
-HEAP; // (declared above already)
+let OS; 	// JS array (stack) of words (Addresses, word-encoded literals, numbers)
+let PC; 	// JS number
+let E; 		// heap Address
+let RTS; 	// JS array (stack) of Addresses
+HEAP; 		// (declared above already)
 
 const microcode = {
 	LDC: (instr) => push(OS, JS_value_to_address(instr.val)),
@@ -727,6 +691,14 @@ function run(instrs) {
 	//display(OS, "\nfinal operands:           ")
 	//print_OS()
 	return address_to_JS_value(peek(OS, 0));
+}
+
+export class RustVirtualMachine {
+	constructor() {}
+
+	execute(instructions: Object[]) {
+		run(instructions)
+	}
 }
 
 // debugging

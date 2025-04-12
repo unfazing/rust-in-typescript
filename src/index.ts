@@ -36,6 +36,7 @@ import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustCompiler } from './CompilerRust.js';
 import { RustTypeChecker } from './TypeCheckerRust.js';
+import { RustVirtualMachine } from './VirtualMachineRust.js';
 
 const chunk = `
 fn main() {
@@ -494,7 +495,43 @@ fn main() {
 }
 `
 
-test_compiler(compiler_code)
+// test_compiler(compiler_code)
+
+const test_VM = (code: string) => {
+    const inputStream = CharStream.fromString(code);
+    const lexer = new RustLexer(inputStream);
+    const tokenStream = new CommonTokenStream(lexer);
+    const parser = new RustParser(tokenStream);
+
+    // Parse the input
+    const tree = parser.crate();
+
+    const compiler = new RustCompiler();
+    const instructions = compiler.compile(tree);
+
+    const VM = new RustVirtualMachine();
+    const result = VM.execute(instructions);
+
+    console.log(result);
+}
+
+const VM_code = `
+fn funk() -> i32 {
+    let x : i32 = 42;
+    let x_ref : &i32 = &x;
+    return *x_ref + 1; // 43
+}
+
+funk();
+`
+
+test_VM(VM_code);
+
+
+
+
+
+
 
 /*
 function main() {

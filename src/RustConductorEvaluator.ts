@@ -4,17 +4,21 @@ import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustCompiler } from "./CompilerRust.js";
+import { RustTypeChecker } from "./TypeCheckerRust.js";
+import { RustVirtualMachine } from "./VirtualMachineRust.js";
 
 export class RustConductorEvaluator extends BasicEvaluator {
     private executionCount: number;
     private compiler: RustCompiler;
+    private typeChecker: RustTypeChecker;
+    private VM: RustVirtualMachine
 
     constructor(conductor: IRunnerPlugin) {
         super(conductor);
         this.executionCount = 0;
-        // this.typechecker = new RustTypeChecker();
+        this.typeChecker = new RustTypeChecker();
         this.compiler = new RustCompiler();
-        // this.VM = new VirtualMachine()
+        this.VM = new RustVirtualMachine();
     }
 
     async evaluateChunk(chunk: string): Promise<void> {
@@ -29,12 +33,18 @@ export class RustConductorEvaluator extends BasicEvaluator {
             // Parse the input
             const tree = parser.crate();
 
-            // this.typechecker.check(tree);
+            // Typecheck
+            this.typeChecker.check(tree);// throws error if type error found
+
+            // Compile
             const instructions: object[] = this.compiler.compile(tree);
-            // const result = this.VM.run(instructions);
+            
+            // Execute instructions on VM
+            const result = this.VM.execute(instructions);
             
             // Send the result to the REPL
-            // this.conductor.sendOutput(`Result of expression: ${result}`);
+            this.conductor.sendOutput(`Result of expression: ${result}`);
+
         }  catch (error) {
             // Handle errors and send them to the REPL
             if (error instanceof Error) {
