@@ -298,7 +298,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     }
 
     // leaf node
-    visitLiteralExpression(ctx: LiteralExpressionContext): String {
+    visitLiteralExpression(ctx: LiteralExpressionContext): string {
         const val = ctx.CHAR_LITERAL()
                     ? new CharRustType(ctx.getText())
                     : ctx.INTEGER_LITERAL()
@@ -322,7 +322,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     }
 
     // leaf node
-    visitPathExpression(ctx: PathExpressionContext): String {
+    visitPathExpression(ctx: PathExpressionContext): string {
         let symbol = this.visitChildren(ctx)
         instrs[wc++] = {
             tag: "LD",
@@ -434,7 +434,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     }
 
     // expression LPAREN callParams? RPAREN
-    visitCallExpression(ctx: CallExpressionContext): String {
+    visitCallExpression(ctx: CallExpressionContext): string {
         let symbol = this.visit(ctx.expression())
         let arity = ctx.callParams() == null || ctx.callParams().expression() == null ? 0 : ctx.callParams().expression().length
         log(`SYMBOL: ${symbol}`, "CALL_EXPRESSION")
@@ -477,8 +477,8 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // | expression ANDAND expression
     // | expression OROR expression
     visitLazyBooleanExpression(ctx: LazyBooleanExpressionContext): any {
-        const op1: String = this.visit(ctx.expression(0));
-        const op2: String = this.visit(ctx.expression(1));
+        const op1: string = this.visit(ctx.expression(0));
+        const op2: string = this.visit(ctx.expression(1));
         const symbol = ctx.ANDAND() != null
                         ? "&&"
                         : ctx.OROR() != null
@@ -493,8 +493,8 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
     // expression comparisonOperator expression 
     visitComparisonExpression(ctx: ComparisonExpressionContext): undefined {
-        const op1: String = this.visit(ctx.expression(0));
-        const op2: String = this.visit(ctx.expression(1));
+        const op1: string = this.visit(ctx.expression(0));
+        const op2: string = this.visit(ctx.expression(1));
 
         const op: ComparisonOperatorContext = ctx.comparisonOperator(); 
         const symbol = op.EQEQ() 
@@ -636,23 +636,17 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // letStatement
     // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
     // ;
-    visitLetStatement(ctx: LetStatementContext): String {
-        let symbol = this.visit(ctx.patternNoTopAlt())
-        let expr = this.visit(ctx.expression())
+    visitLetStatement(ctx: LetStatementContext): string {
+        let symbol = this.visit(ctx.patternNoTopAlt())  // no instruction, just look up symbol
+        let expr = this.visit(ctx.expression())         // add LOAD instruction to push to OS
         log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
         log(`EXPR: ${expr}`, "LET_STATEMENT")
         
-        if (symbol.startsWith("mut ")) {
-            instrs[wc++] = {
-                tag: "MUT_ASSIGN", // mutable assign
-                pos: compile_time_environment_position(ce, symbol.substring(4)),
-            };
-        } else {
-            instrs[wc++] = {
-                tag: "ASSIGN", // immutable assign
-                pos: compile_time_environment_position(ce, symbol),
-            };
-        }
+        instrs[wc++] = {
+            tag: "ASSIGN", 
+            pos: compile_time_environment_position(ce, symbol),
+        };
+        
         return symbol;
     }
 
@@ -674,29 +668,23 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // identifierPattern
     // : KW_REF? KW_MUT? identifier (AT pattern)?
     // ;
-    visitIdentifierPattern(ctx: IdentifierPatternContext): String {
-        if (ctx.KW_MUT() != null) {
-            // pass mutability information up to LetStatement
-            log(`FOUND MUT ${ctx.identifier().getText()}`, "IDENTIFIER_PATTERN")
-            return "mut " + ctx.identifier().getText(); // append "mut" + whitespace to identifier
-        } else {
-            return ctx.identifier().getText();
-        }
+    visitIdentifierPattern(ctx: IdentifierPatternContext): string {
+        return this.visit(ctx.identifier());
     }
 
-    visitIdentifier(ctx: IdentifierContext): String {
+    visitIdentifier(ctx: IdentifierContext): string {
         return ctx.getText();
     }
 
 
 
     // Override the default result method from AbstractParseTreeVisitor
-    protected defaultResult(): String {
+    protected defaultResult(): string {
         return instrs.map(obj => JSON.stringify(obj)).join("\n ");
     }
     
     // Override the aggregate result method
-    protected aggregateResult(aggregate: String, nextResult: String): String {
+    protected aggregateResult(aggregate: string, nextResult: string): string {
         return nextResult;
     }
 }

@@ -462,40 +462,43 @@ function printInstructions(instrs: object[]): undefined {
 
 const compiler_code = `
 fn main() {
-    const TEST_CONST: i32 = 1;
-    let mut test_mut_let: i32 = 2;
-    fn test_closure(p1: i32, p2: i32) {
-        const FILLER: i32 = 11;
-        return 3;
-    }
-    test_mut_let = test_mut_let + 6;
-    test_closure(4, 5);
+    // const TEST_CONST: i32 = 1;
+    // let mut test_mut_let: i32 = 2;
+    // fn test_closure(p1: i32, p2: i32) {
+    //     const FILLER: i32 = 11;
+    //     return 3;
+    // }
+    // test_mut_let = test_mut_let + 6;
+    // test_closure(4, 5);
 
-    let mut x : i32 = 0;
-    while x < 5 {
-        x = x + 1;
-    }
+    // let mut x : i32 = 0;
+    // while x < 5 {
+    //     x = x + 1;
+    // }
 
-    if (true) {
-        1;
-    } // no else branch
+    // if (true) {
+    //     1;
+    // } // no else branch
 
-    fn validate(z: i32) -> bool {
-        return z >= 2;
-    }
+    // fn validate(z: i32) -> bool {
+    //     return z >= 2;
+    // }
 
-    const y : i32 = 5;
-    if (y < 2) { // comparisonExpression
-        return y;
-    } else if (validate(y)) { // functionCall + another if expression after else
-        return y;
-    } else {
-        return y;
-    }
+    // const y : i32 = 5;
+    // if (y < 2) { // comparisonExpression
+    //     return y;
+    // } else if (validate(y)) { // functionCall + another if expression after else
+    //     return y;
+    // } else {
+    //     return y;
+    // }
+
+    let x : i32 = 42;
+    let mut y : bool = true;
 }
 `
 
-// test_compiler(compiler_code)
+test_compiler(compiler_code)
 
 const test_VM = (code: string) => {
     const inputStream = CharStream.fromString(code);
@@ -509,23 +512,23 @@ const test_VM = (code: string) => {
     const compiler = new RustCompiler();
     const instructions = compiler.compile(tree);
 
-    const VM = new RustVirtualMachine();
-    const result = VM.execute(instructions);
+    // const VM = new RustVirtualMachine();
+    // const result = VM.execute(instructions);
 
-    console.log(result);
+    // console.log(result);
 }
 
-const VM_code = `
-fn funk() -> i32 {
-    let x : i32 = 42;
-    let x_ref : &i32 = &x;
-    return *x_ref + 1; // 43
-}
+// const VM_code = `
+// fn funk() -> i32 {
+//     let x : i32 = 42;
+//     let x_ref : &i32 = &x;
+//     return *x_ref + 1; // 43
+// }
 
-funk();
-`
+// funk();
+// `
 
-test_VM(VM_code);
+// test_VM(VM_code);
 
 
 
