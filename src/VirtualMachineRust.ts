@@ -2,7 +2,13 @@ import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
 
-// (2) no loops and arrays
+const LOGGING_ENABLED = false;
+function log(message: any, enclosing_function: string): void {
+    if (LOGGING_ENABLED) {
+        console.log(`[${enclosing_function}] --- ${message}`);
+    }
+}
+
 
 /* **********************
  * using arrays as stacks
@@ -33,21 +39,21 @@ const peek = (array, address) => array.slice(-1 - address)[0];
 //
 // Primitives are stored on the stack, the rest on the heap.
 
-const False_tag 		= 0;
-const True_tag			= 1;
-const I32_tag 			= 2;
-const F64_tag 			= 3;
-const Unit_tag 			= 4; // equivalent to undefined
-const Char_tag			= 5;
-const Blockframe_tag	= 6;
-const Callframe_tag 	= 7;
-const Closure_tag 		= 8;
-const Frame_tag 		= 9;
-const Environment_tag 	= 10;
-const Pair_tag 			= 11;
-const Builtin_tag 		= 12;
-const String_tag 		= 13; 
-const Reference_tag 	= 14;
+const False_tag = 0;
+const True_tag = 1;
+const I32_tag = 2;
+const F64_tag = 3;
+const Unit_tag = 4; 
+const Char_tag = 5;
+const Blockframe_tag = 6;
+const Callframe_tag = 7;
+const Closure_tag = 8;
+const Frame_tag = 9;
+const Environment_tag = 10;
+const Pair_tag = 11;
+const Builtin_tag = 12;
+const String_tag = 13;
+const Reference_tag = 14;
 
 
 /* *************************
@@ -92,25 +98,71 @@ class Stack {
 		this.SP = starting_address;
 	}
 
-	pop_Blockframe() {
-		// sanity check
-		if (!this.is_Blockframe()) {
-			throw new Error("FP is not pointed to a block frame.")
-		}
+	print_stack_state(): void {
+        console.log("=== Stack State (Raw Bits) ===");
+        console.log(`Bounds: [${this.start_addr}..${this.end_addr}] (${(this.end_addr - this.start_addr) * word_size} bytes)`);
+        console.log(`Registers: FP = ${this.FP}, SP = ${this.SP}`);
+        console.log("\nMemory Contents:");
 
-		this.SP = this.FP;
-		this.FP = this.get_Blockframe_FP();
-	}
+        // Print header
+        console.log(
+            "Address".padEnd(10) + "\t" +
+            "Tag".padEnd(15) + "\t" +
+            "Bits (64-bit)".padEnd(68) + "\t" +
+            "Pointer"
+        );
 
-	pop_Callframe() {
-		// sanity check
-		if (!this.is_Callframe()) {
-			throw new Error("FP is not pointed to a call frame.")
-		}
+        for (let addr = this.start_addr; addr < this.start_addr + 30; addr++) {
+            const virtual_addr = this.convert_to_virtual_addr(addr);
+            const word_start = virtual_addr * word_size;
+            
+            const tag = this.stack.getUint8(word_start);
+            const bits = this.get_word_bits(word_start);
+            
+            const pointers = [
+                addr === this.SP ? "SP" : "",
+                addr === this.FP ? "FP" : ""
+            ].filter(Boolean).join("|") || "";
 
-		this.SP = this.FP;
-		this.FP = this.get_Callframe_FP();
-	}
+            console.log(
+                `${addr}`.padEnd(10) + "\t" +
+                `${this.tag_to_string(tag)}`.padEnd(15) + "\t" +
+                `${bits}`.padEnd(68) + "\t" +
+                `${pointers}`
+            );
+        }
+    }
+
+    private get_word_bits(byteOffset: number): string {
+        // Get all 8 bytes as a BigInt for full 64-bit representation
+        const bigIntVal = this.stack.getBigUint64(byteOffset);
+        
+        // Convert to binary string and pad to 64 bits
+        return bigIntVal.toString(2).padStart(64, '0')
+            .replace(/(\d{8})(?=\d)/g, '$1 '); // Add space every 8 bits
+    }
+
+    // Helper to convert tag numbers to names (you'll need to define your tag constants)
+    private tag_to_string(tag: number): string {
+        const tagMap = {
+            [False_tag]: "False",
+            [True_tag]: "True",
+            [I32_tag]: "I32",
+            [F64_tag]: "F64",
+            [Unit_tag]: "Unit",
+            [Char_tag]: "Char",
+            [Blockframe_tag]: "BlockFrame",
+            [Callframe_tag]: "CallFrame",
+            [Closure_tag]: "Closure",
+            [Frame_tag]: "Frame",
+            [Environment_tag]: "Environment",
+            [Pair_tag]: "Pair",
+            [Builtin_tag]: "Builtin",
+            [String_tag]: "String",
+            [Reference_tag]: "Reference"
+        };
+        return tagMap[tag] || `Unknown`;
+    }
 
 	is_out_of_range(address: number): boolean {
 		return address < this.start_addr || address >= this.end_addr;
@@ -289,6 +341,9 @@ class Stack {
 	//  1 byte unused, 2 bytes #children, 1 byte unused]
 	// followed by the address of env
 	allocate_Callframe(env_address: number, pc: number): number {
+		log(`Stack before allot:`, "ALLOCATING CALL FRAME")
+		// this.print_stack_state();
+
 		const address = this.allocate(Callframe_tag, 3);
 
 		this.set_2_bytes_at_offset(address, 2, pc);
@@ -297,6 +352,9 @@ class Stack {
 
 		// FP points to the start of this call frame
 		this.FP = address; 
+
+		log(`Stack after allot:`, "ALLOCATING CALL FRAME")
+		// this.print_stack_state();
 
 		return address;
 	}
@@ -317,17 +375,41 @@ class Stack {
 		return this.get_tag(this.FP) === Callframe_tag;
 	}
 
+	pop_Callframe() {
+		log(`Stack before pop:`, "POP CALL FRAME")
+		// this.print_stack_state();
+
+		// sanity check
+		if (!this.is_Callframe()) {
+			throw new Error("FP is not pointed to a call frame.")
+		}
+
+		this.SP = this.FP;
+		this.FP = this.get_Callframe_FP();
+
+		log(`Stack after pop:`, "POP CALL FRAME")
+		// this.print_stack_state();
+
+	}
+
 	// block frame
 	// [1 byte tag, 4 bytes unused,
 	//  2 bytes #children, 1 byte unused]
 	// followed by the address of env
-	allocate_Blockframe(env_addr: number) {
-		const address = this.allocate(Blockframe_tag, 2);
+	allocate_Blockframe(env_addr: number): number {
+
+		log(`Stack before allot:`, "ALLOCATING BLOCK FRAME")
+		// this.print_stack_state();
+
+		const address = this.allocate(Blockframe_tag, 3);
 		this.set(address + 1, env_addr);
 		this.set(address + 2, this.FP); // saved FP to restore later
 
 		// FP points to the start of this block frame
 		this.FP = address; 
+
+		log(`Stack after allot:`, "ALLOCATING BLOCK FRAME")
+		// this.print_stack_state()
 
 		return address;
 	};
@@ -342,6 +424,22 @@ class Stack {
 
 	is_Blockframe(): boolean {
 		return this.get_tag(this.FP) === Blockframe_tag;
+	}
+
+	pop_Blockframe() {
+		log(`Stack before pop:`, "[POP BLOCK FRAME]")
+		// this.print_stack_state()
+
+		// sanity check
+		if (!this.is_Blockframe()) {
+			throw new Error("FP is not pointed to a block frame.")
+		}
+
+		this.SP = this.FP;
+		this.FP = this.get_Blockframe_FP();
+
+		log(`Stack after pop:`, "[POP BLOCK FRAME]")
+		// this.print_stack_state()
 	}
 
 }
@@ -954,7 +1052,7 @@ const microcode = {
 		}
 		OS.pop(); // pop fun
 
-		STACK.allocate(E, PC);
+		STACK.allocate_Callframe(E, PC);
 
 		E = heap_Environment_extend(
 			frame_address,
@@ -995,7 +1093,7 @@ const microcode = {
 	},
 	RESET: (instr) => {
 		// TODO: free current env node + lastest env frame
-// 
+
 		while (STACK.is_Blockframe()) {
 			// TODO: free environment node + latest env frame of this block frame
 
@@ -1023,13 +1121,13 @@ function run(instrs) {
 	// todo: clear stack and heap?? but clear what?? stack and heap should be initialized with global env and canonical values (true, false, unit)
 
 	while (!(instrs[PC].tag === "DONE")) {
-		//heap_display()
-		//print_OS("\noperands:            ");
-		//print_RTS("\nRTS:            ");
-
 		const instr = instrs[PC++];
 		microcode[instr.tag](instr);
+
+		// log(JSON.stringify(instr), "INS")
+		// STACK.print_stack_state()
 	}
+
 	//print_OS()
 
 	const value_in_Rust = address_to_Rust_value(peek(OS, 0));
@@ -1045,38 +1143,10 @@ export class RustVirtualMachine {
 }
 
 // debugging
-
-// const print_code = () => {
-// 	for (let i = 0; i < instrs.length; i = i + 1) {
-// 		const instr = instrs[i];
-// 		display(
-// 			"",
-// 			stringify(i) +
-// 				": " +
-// 				instr.tag +
-// 				" " +
-// 				(instr.tag === "GOTO" ? stringify(instr.addr) : "") +
-// 				(instr.tag === "ENTER_SCOPE" ? stringify(instr.num) : "") +
-// 				(instr.tag === "LDC" ? stringify(instr.val) : "") +
-// 				(instr.tag === "ASSIGN" ? stringify(instr.pos) : "") +
-// 				(instr.tag === "LD" ? stringify(instr.pos) : "") +
-// 				(instr.tag === "BINOP" ? stringify(instr.sym) : ""),
-// 		);
-// 	}
-// };
-
-// const print_RTS = (x) => {
-// 	display("", x);
-// 	for (let i = 0; i < RTS.length; i = i + 1) {
-// 		const f = RTS[i];
-// 		display("", stringify(i) + ": " + f.tag);
-// 	}
-// };
-
-// const print_OS = (x) => {
-// 	display("", x);
-// 	for (let i = 0; i < OS.length; i = i + 1) {
-// 		const val = OS[i];
-// 		display("", stringify(i) + ": " + address_to_JS_value(val));
-// 	}
-// };
+const print_OS = () => {
+	console.log("Printing OS:\n")
+	for (let i = 0; i < OS.length; i = i + 1) {
+		const val = OS[i];
+		console.log(i + ": " + JSON.stringify(address_to_Rust_value(val)) + "\n");
+	}
+};

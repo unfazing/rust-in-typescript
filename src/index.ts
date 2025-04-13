@@ -1,4 +1,3 @@
-
 /*
 Original Code:
 
@@ -210,7 +209,6 @@ fn main() {
 `
 
 export let LOGGING_ENABLED = false;
-
 const test_typechecker = (code: string, expected_error: string, enable_log?: boolean) => {
 
     if (enable_log) {
@@ -465,7 +463,7 @@ test_typechecker(`
 fn pass_create_borrow_using_deref() {
     let x: i32 = 42;
     let x_ref: &i32 = &x;
-    let x_ref_2: &i32 = &(*x_ref);
+    let x_ref_2: &i32 = &(*x_ref); 
 }
 `, "")
 
@@ -491,6 +489,37 @@ fn pass_deref_then_assign_to_temp_var() {
     *x_ref = 69;
 }
 `, "") 
+
+
+test_typechecker(`
+fn pass_compare_i32() {
+    let x: i32 = 2; 
+    let y: i32 = 1;
+    x < y;
+}
+`, "") 
+
+test_typechecker(`
+fn pass_compare_i32_with_f64() {
+    let x: i32 = 2; 
+    let y: f64 = 1.5;
+    (x > y) || (y < x);
+}
+`, "") 
+
+test_typechecker(`
+fn pass_compare_i32_with_f64_raw() {
+    let x: i32 = 2; 
+    x <= 9.99;
+}
+`, "") 
+
+test_typechecker(`
+fn fail_compare_i32_with_bool_or_char() {
+    let x: i32 = 2; 
+    x < true && x >= 'a';
+}
+`, "Type error in comparison expression") 
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);
@@ -554,340 +583,176 @@ fn main() {
 }
 `
 
-test_compiler(compiler_code)
+// test_compiler(compiler_code)
 
-const test_VM = (code: string) => {
-    const inputStream = CharStream.fromString(code);
-    const lexer = new RustLexer(inputStream);
-    const tokenStream = new CommonTokenStream(lexer);
-    const parser = new RustParser(tokenStream);
+const test_VM = (code: string, expectedResult: any, testName?: string) => {
+    console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
+    console.log(`Code: ${code}`);
+    
+    try {
+        const inputStream = CharStream.fromString(code);
+        const lexer = new RustLexer(inputStream);
+        const tokenStream = new CommonTokenStream(lexer);
+        const parser = new RustParser(tokenStream);
 
-    // Parse the input
-    const tree = parser.crate();
+        // Parse the input
+        const tree = parser.crate();
 
-    const compiler = new RustCompiler();
-    const instructions = compiler.compile(tree);
-
-    // const VM = new RustVirtualMachine();
-    // const result = VM.execute(instructions);
-
-    // console.log(result);
-}
-
-// const VM_code = `
-// fn funk() -> i32 {
-//     let x : i32 = 42;
-//     let x_ref : &i32 = &x;
-//     return *x_ref + 1; // 43
-// }
-
-// funk();
-// `
-
-// test_VM(VM_code);
-
-
-
-
-
-
-
-/*
-function main() {
-    const TEST_CONST = 1;
-    let test_mut_let = 2;
-    function test_closure(p1, p2) {
-        const filler = 11;
-        return 3;
+        const compiler = new RustCompiler();
+        const instructions = compiler.compile(tree);
+        // printInstructions(instructions);
+    
+        const VM = new RustVirtualMachine();
+        const actualResult = VM.execute(instructions);
+        
+        console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
+        
+        if (actualResult === expectedResult) {
+            console.log("✅ Test Passed");
+            return true;
+        } else {
+            console.log("❌ Test Failed - Result mismatch");
+            throw new Error(`Expected ${expectedResult} but got ${actualResult}`);
+        }
+    } catch (error) {
+        console.log(`❌ Test Failed - ${error.message}`);
+        console.log(error.stack); // Include stack trace for debugging
+        return false;
     }
-    test_mut_let = test_mut_let + 6;
-    test_closure(4, 5);
+};
 
-    let x = 0;
-    while (x < 5) {
-        x = x + 1;
+// Basic expressions
+test_VM("fn main() -> i32 { 1 }", 1);
+test_VM("fn main() -> i32 { 2 + 3 }", 5);
+test_VM("fn main() -> i32 { 1; 2; 3 }", 3);
+test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3);
+test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3);
+
+// Blocks and variables
+test_VM(
+    `
+    fn main() -> i32 {
+        let y = 4; 
+        {
+            let x = y + 7; 
+            x * 2
+        }
     }
+    `, 22,
+);
 
-    if (true) {
-        1;
+// Functions
+test_VM(
+    `
+    fn f() -> i32 { 1 }
+    fn main() -> i32 { f() }
+    `, 1,
+);
+
+test_VM(
+    `
+    fn f(x: i32) -> i32 { x }
+    fn main() -> i32 { f(33) }`,
+    33,
+);
+
+test_VM(
+    `
+    fn f(x: i32, y: i32) -> i32 { x - y }
+    fn main() -> i32 { f(33, 22) }`,
+    11,
+);
+
+// Recursive functions
+test_VM(
+    `
+    fn fact(n: i32) -> i32 {
+        if n == 1 { 1 } else { n * fact(n - 1) }
     }
+    fn main() -> i32 { fact(10) }`,
+    3628800,
+);
 
-    function validate(z) {
-        return z >= 2;
+test_VM(
+    `
+    fn fact(n: i32) -> i32 { fact_iter(n, 1, 1) }
+    fn fact_iter(n: i32, i: i32, acc: i32) -> i32 {
+        if i > n {
+            acc
+        } else {
+            fact_iter(n, i + 1, acc * i)
+        }
     }
+    fn main() -> i32 { fact(4) }`,
+    24,
+);
 
-    const y = 5;
-    if (y < 2) { // comparisonExpression
-        return y;
-    } else if (validate(y)) { // functionCall + another if expression after else
-        return y;
-    } else {
-        return y;
-    }
-}
+// Loops
+test_VM(
+    `
+    fn main() -> () {
+        while false { 1; }
+    }`,
+    undefined,
+);
 
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        x = 1;
+        while x < 2 {
+            1;
+            x = x + 1;
+        }
+        x
+    }`,
+    2,
+);
 
-0: ENTER_SCOPE 1 ""
-1: LDF  ""
-2: GOTO 86 ""
-3: ENTER_SCOPE 6 ""
-4: LDC 1 ""
-5: ASSIGN [3, 0] ""
-6: POP  ""
-7: LDC 2 ""
-8: ASSIGN [3, 1] ""
-9: POP  ""
-10: LDF  ""
-11: GOTO 21 ""
-12: ENTER_SCOPE 1 ""
-13: LDC 11 ""
-14: ASSIGN [5, 0] ""
-15: POP  ""
-16: LDC 3 ""
-17: RESET  ""
-18: EXIT_SCOPE  ""
-19: LDC undefined ""
-20: RESET  ""
-21: ASSIGN [3, 2] ""
-22: POP  ""
-23: LD [3, 1] ""
-24: LDC 6 ""
-25: BINOP "+" ""
-26: ASSIGN [3, 1] ""
-27: POP  ""
-28: LD [3, 2] ""
-29: LDC 4 ""
-30: LDC 5 ""
-31: CALL  ""
-32: POP  ""
-33: LDC 0 ""
-34: ASSIGN [3, 3] ""
-35: POP  ""
-36: LD [3, 3] ""
-37: LDC 5 ""
-38: BINOP "<" ""
-39: JOF  ""
-enter
-40: LD [3, 3] ""
-41: LDC 1 ""
-42: BINOP "+" ""
-43: ASSIGN [3, 3] ""
-exit
-44: POP  ""
-45: GOTO 36 ""
-46: LDC undefined ""
-47: POP  ""
-48: LDC true ""
-49: JOF  ""
-ENTER
-50: LDC 1 ""
-EXIT 54
-51: GOTO 53 ""
-52: LDC undefined ""
-53: POP  ""
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        x = 1;
+        while x < 3 {
+            1;
+            x = x + 1;
+        }
+        x
+    }`,
+    3, "Max depth??"
+);
 
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        let mut i = 0;
+        while i < 100 {
+            let mut j = 0;
+            while j < 100 {
+                x = x + i + j;
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        x
+    }`,
+    990000,
+);
 
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        let mut i = 0;
+        while i < 1000 {
+            let y = 1;
+            i = i + 1;
+        }
+        i
+    }`,
+    1000,
+);
 
-54: LDF  ""
-55: GOTO 62 ""
-ENTER
-56: LD [4, 0] ""
-57: LDC 2 ""
-58: BINOP ">=" ""
-59: RESET  ""
-EXIT
-60: LDC undefined ""
-61: RESET  ""
-62: ASSIGN [3, 4] ""
-63: POP  ""
-64: LDC 5 ""
-65: ASSIGN [3, 5] ""
-66: POP  ""
-67: LD [3, 5] ""
-68: LDC 2 ""
-69: BINOP "<" ""
-70: JOF  ""
-ENTER
-71: LD [3, 5] ""
-72: RESET  ""
-EXIT
-73: GOTO 83 ""
-74: LD [3, 4] ""
-75: LD [3, 5] ""
-76: CALL  ""
-77: JOF  ""
-ENTER
-78: LD [3, 5] ""
-79: RESET  ""
-EXIT
-80: GOTO 83 ""
-ENTER
-81: LD [3, 5] ""
-82: RESET  ""
-Exit
-83: EXIT_SCOPE  ""
-84: LDC undefined ""
-85: RESET  ""
-86: ASSIGN [1, 0] ""
-87: EXIT_SCOPE  ""
-88: DONE  ""
-
-{ "tag": "blk",
-  "body":
-  { "tag": "fun",
-    "sym": "main",
-    "prms": [],
-    "body":
-    { "tag": "blk",
-      "body":
-      { "tag": "seq",
-        "stmts":
-        [ {"tag": "const", "sym": "TEST_CONST", "expr": {"tag": "lit", "val": 1}},
-          {"tag": "let", "sym": "test_mut_let", "expr": {"tag": "lit", "val": 2}},
-          {"tag": "fun", "sym": "test_closure", "prms": ["p1", "p2"], "body": {"tag": "blk", "body": {"tag": "seq", "stmts": [{"tag": "const", "sym": "filler", "expr": {"tag": "lit", "val": 11}}, {"tag": "ret", "expr": {"tag": "lit", "val": 3}}]}}},
-          {"tag": "assmt", "sym": "test_mut_let", "expr": {"tag": "binop", "sym": "+", "frst": {"tag": "nam", "sym": "test_mut_let"}, "scnd": {"tag": "lit", "val": 6}}},
-          {"tag": "app", "fun": {"tag": "nam", "sym": "test_closure"}, "args": [{"tag": "lit", "val": 4}, {"tag": "lit", "val": 5}]},
-          {"tag": "let", "sym": "x", "expr": {"tag": "lit", "val": 0}},
-          {"tag": "while", "pred": {"tag": "binop", "sym": "<", "frst": {"tag": "nam", "sym": "x"}, "scnd": {"tag": "lit", "val": 5}}, "body": {"tag": "assmt", "sym": "x", "expr": {"tag": "binop", "sym": "+", "frst": {"tag": "nam", "sym": "x"}, "scnd": {"tag": "lit", "val": 1}}}},
-          {"tag": "cond", "pred": {"tag": "lit", "val": true}, "cons": {"tag": "lit", "val": 1}, "alt": {"tag": "seq", "stmts": []}},
-          {"tag": "fun", "sym": "validate", "prms": ["z"], "body": {"tag": "ret", "expr": {"tag": "binop", "sym": ">=", "frst": {"tag": "nam", "sym": "z"}, "scnd": {"tag": "lit", "val": 2}}}},
-          {"tag": "const", "sym": "y", "expr": {"tag": "lit", "val": 5}},
-          {"tag": "cond", "pred": {"tag": "binop", "sym": "<", "frst": {"tag": "nam", "sym": "y"}, "scnd": {"tag": "lit", "val": 2}}, "cons": {"tag": "ret", "expr": {"tag": "nam", "sym": "y"}}, "alt": {"tag": "cond", "pred": {"tag": "app", "fun": {"tag": "nam", "sym": "validate"}, "args": [{"tag": "nam", "sym": "y"}]}, "cons": {"tag": "ret", "expr": {"tag": "nam", "sym": "y"}}, "alt": {"tag": "ret", "expr": {"tag": "nam", "sym": "y"}}}}]}}}}
-
-fn main() {
-    const TEST_CONST: i32 = 1;
-    let mut test_mut_let: i32 = 2;
-    fn test_closure(p1: i32, p2: i32) {
-        const FILLER: i32 = 11;
-        return 3;
-    }
-    test_mut_let = test_mut_let + 6;
-    test_closure(4, 5);
-
-    let mut x : i32 = 0;
-    while x < 5 {
-        x = x + 1;
-    }
-
-    if (true) {
-        1;
-    } // no else branch
-
-    fn validate(z: i32) -> bool {
-        return z >= 2;
-    }
-
-    const y : i32 = 5;
-    if (y < 2) { // comparisonExpression
-        return y;
-    } else if (validate(y)) { // functionCall + another if expression after else
-        return y;
-    } else {
-        return y;
-    }
-}
-
-
-0: {"tag":"ENTER_SCOPE","num":1}
-1: {"tag":"LDF","arity":0,"addr":3}
-2: {"tag":"GOTO","addr":96}
-3: {"tag":"ENTER_SCOPE","num":6}
-4: {"tag":"LDC","val":"1"}
-5: {"tag":"ASSIGN","pos":[3,0]}
-6: {"tag":"POP"}
-7: {"tag":"LDC","val":"2"}
-8: {"tag":"MUT_ASSIGN","pos":[3,1]}
-9: {"tag":"POP"}
-10: {"tag":"LDF","arity":2,"addr":12}
-11: {"tag":"GOTO","addr":21}
-12: {"tag":"ENTER_SCOPE","num":1}
-13: {"tag":"LDC","val":"11"}
-14: {"tag":"ASSIGN","pos":[5,0]}
-15: {"tag":"POP"}
-16: {"tag":"LDC","val":"3"}
-17: {"tag":"RESET"}
-18: {"tag":"EXIT_SCOPE"}
-19: {"tag":"LDC"}
-20: {"tag":"RESET"}
-21: {"tag":"ASSIGN","pos":[3,2]}
-22: {"tag":"POP"}
-23: {"tag":"LD","sym":"test_mut_let","pos":[3,1]}
-24: {"tag":"LDC","val":"6"}
-25: {"tag":"BINOP","sym":"+"}
-26: {"tag":"ASSIGN","pos":[3,1]}
-27: {"tag":"POP"}
-28: {"tag":"LD","sym":"test_closure","pos":[3,2]}
-29: {"tag":"LDC","val":"4"}
-30: {"tag":"LDC","val":"5"}
-31: {"tag":"CALL","arity":2}
-32: {"tag":"POP"}
-33: {"tag":"LDC","val":"0"}
-34: {"tag":"MUT_ASSIGN","pos":[3,3]}
-35: {"tag":"POP"}
-36: {"tag":"LD","sym":"x","pos":[3,3]}
-37: {"tag":"LDC","val":"5"}
-38: {"tag":"BINOP","sym":"<"}
-39: {"tag":"JOF","addr":48}
-40: {"tag":"ENTER_SCOPE","num":0} <<<
-41: {"tag":"LD","sym":"x","pos":[3,3]}
-42: {"tag":"LDC","val":"1"}
-43: {"tag":"BINOP","sym":"+"}
-44: {"tag":"ASSIGN","pos":[3,3]}
-45: {"tag":"EXIT_SCOPE"} <<<
-46: {"tag":"POP"}
-47: {"tag":"GOTO","addr":36}
-48: {"tag":"LDC"}
-49: {"tag":"POP"}
-50: {"tag":"LDC","val":"true"}
-51: {"tag":"JOF","addr":55}
-52: {"tag":"ENTER_SCOPE","num":0} <<<
-53: {"tag":"LDC","val":"1"}
-54: {"tag":"EXIT_SCOPE"} <<<
-55: {"tag":"POP"} <<<
-
-
-
-56: {"tag":"LDF","arity":1,"addr":58}
-57: {"tag":"GOTO","addr":66}
-58: {"tag":"ENTER_SCOPE","num":0}
-59: {"tag":"LD","sym":"z","pos":[8,0]}
-60: {"tag":"LDC","val":"2"}
-61: {"tag":"BINOP","sym":">="}
-62: {"tag":"RESET"}
-63: {"tag":"EXIT_SCOPE"}
-64: {"tag":"LDC"}
-65: {"tag":"RESET"}
-66: {"tag":"ASSIGN","pos":[3,4]}
-67: {"tag":"POP"}
-68: {"tag":"LDC","val":"5"}
-69: {"tag":"ASSIGN","pos":[3,5]}
-70: {"tag":"POP"}
-71: {"tag":"LD","sym":"y","pos":[3,5]}
-72: {"tag":"LDC","val":"2"}
-73: {"tag":"BINOP","sym":"<"}
-74: {"tag":"JOF","addr":80}
-75: {"tag":"ENTER_SCOPE","num":0}
-76: {"tag":"LD","sym":"y","pos":[3,5]}
-77: {"tag":"RESET"}
-78: {"tag":"EXIT_SCOPE"}
-79: {"tag":"GOTO","addr":93}
-80: {"tag":"LD","sym":"validate","pos":[3,4]}
-81: {"tag":"LD","sym":"y","pos":[3,5]}
-82: {"tag":"CALL","arity":1}
-83: {"tag":"JOF","addr":89}
-84: {"tag":"ENTER_SCOPE","num":0}
-85: {"tag":"LD","sym":"y","pos":[3,5]}
-86: {"tag":"RESET"}
-87: {"tag":"EXIT_SCOPE"}
-88: {"tag":"GOTO","addr":93}
-89: {"tag":"ENTER_SCOPE","num":0}
-90: {"tag":"LD","sym":"y","pos":[3,5]}
-91: {"tag":"RESET"}
-92: {"tag":"EXIT_SCOPE"}
-93: {"tag":"EXIT_SCOPE"}
-94: {"tag":"LDC"}
-95: {"tag":"RESET"}
-96: {"tag":"ASSIGN","pos":[1,0]}
-97: {"tag":"EXIT_SCOPE"}
-98: {"tag":"DONE"}
-*/

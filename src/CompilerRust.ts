@@ -251,8 +251,7 @@ let wc = 0;
 let instrs = [];
 let ce = global_compile_environment;
 
-const LOGGING_ENABLED = true; // Set to false to disable logging
-
+const LOGGING_ENABLED = false; // Set to false to disable logging
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
         console.log(`[${enclosing_function}] --- ${message}`);
