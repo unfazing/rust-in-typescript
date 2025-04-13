@@ -359,7 +359,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // blockExpression
     // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
     // ;
-    visitBlockExpression (ctx: BlockExpressionContext): undefined {
+    visitBlockExpression(ctx: BlockExpressionContext): undefined {
         if (ctx.statements() == null) {
             instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }
             return;
@@ -395,23 +395,46 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
         log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
         
-        instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length };
+        instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }; // TODO: dont create enter and exit scope ins during function call
         ce = compile_time_environment_extend(locals, ce)
 
+        log(`VISITING STATEMENTS`, "BLOCK_EXPRESSION");
+        this.visit(ctx.statements());
+
+		instrs[wc++] = { tag: "EXIT_SCOPE" };
+        ce = compile_time_environment_restore(ce);
+    }
+
+    //statements
+    // : statement+ expression?
+    // | expression
+    visitStatements(ctx: StatementsContext) {
+
+        // a single expression
+        if (ctx.statement().length === 0 && ctx.expression()) {
+            log(`Visiting the only expression: ${ctx.expression().getText()}`, "STATEMENTS")
+            return this.visit(ctx.expression());
+        }
+
+        // else, statement+ expression?
         let first = true;
-        statements.forEach(stmt => {
+        ctx.statement().forEach(stmt => {
             if (first) {
                 first = false
             } else {
                 instrs[wc++] = { tag: "POP" }
-                log("ADDING POP", "BLOCK_EXPRESSION")
             }
-            log(`Visiting child statement ${stmt.getText()}`, "BLOCK_EXPRESSION")
+            
+            log(`Visiting child statement ${stmt.getText()}`, "STATEMENTS")
             this.visit(stmt)
         })
 
-		instrs[wc++] = { tag: "EXIT_SCOPE" };
-        ce = compile_time_environment_restore(ce);
+        if (ctx.expression()) {
+            instrs[wc++] = { tag: "POP" }
+
+            log(`Visiting the last expression: ${ctx.expression().getText()}`, "STATEMENTS")
+            this.visit(ctx.expression());
+        }
     }
 
     // expression EQ expression
