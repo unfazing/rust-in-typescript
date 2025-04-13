@@ -320,12 +320,6 @@ class TypeError extends Error {
 // No real change is required to the type environment in this case.
 // The variable that is assigned will have the same type as the return type of f().
 
-// TODO!!!!!: DONT SCAN OUT BLOCKS, ADD TO FRAME WHEN ENCOUNTER ASSIGN, LET, FUNCTION_, CONSTANT ITEM
-// TODO: cannot move by dereferencing a borrow. y1 = *y2; 
-// TODO: must check if deferencing a mutable or immutable borrow. *y1 = y2;
-// (consider implementing dereference type, or mapping inner type of a ref to actual type of variable)
-
-
 // SIMPLE IMPLEMENTATION OF BORROW CHECKING
 // In the simple implementation, a borrow is considered alive if it's scope has not ended
 // In rust, the liveness of a borrow is determined if it is going to be used again later.
@@ -702,7 +696,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 return new ScalarType('i32')
             }    
 
-            print_or_throw_error(`Type error; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+            print_or_throw_error(`Type error in bitwise operation; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
         }
 
         // MODULO operation
@@ -712,7 +706,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 return new ScalarType('i32')
             } 
             
-            print_or_throw_error(`Type error; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+            print_or_throw_error(`Type error in modulo operation; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
         }
 
         // else, other arithmetic operation
@@ -720,7 +714,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return new ScalarType(t1.TypeName)
         } 
         
-        print_or_throw_error(`Type error; Operator '${symbol}' requires matching numeric operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+        print_or_throw_error(`Type error in arithmetic operation; Operator '${symbol}' requires matching numeric operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
 
         return new UnitType(); // prevent runtime error (return undefined)
     }
@@ -777,7 +771,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 const valid_type2 = (t2.TypeName === 'i32' || t2.TypeName === 'f64');
                 if (!valid_type1 || !valid_type2) {
                     print_or_throw_error(
-                        `Type error; Operator '${symbol}' requires matching numeric operands, ` + 
+                        `Type error in comparison expression; Operator '${symbol}' requires matching numeric operands, ` + 
                         `found ${unparse_type(t1)} and ${unparse_type(t2)}`);
                 } 
                 break;
