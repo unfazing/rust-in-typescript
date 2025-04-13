@@ -690,15 +690,39 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                                     : ctx.CARET()
                                         ? "^"
                                         : print_or_throw_error(`YET TO IMPLEMENT THIS ArithmeticOrLogicalExpression SYMBOL`)
+
         log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
 
         // log(JSON.stringify(te.type_environment, null, 4), "arith");
 
-        if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
-            return new ScalarType(t1.TypeName)
-        } else {
-            print_or_throw_error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+        // bitwise operation
+        if ((symbol === '&') || (symbol === '|') || (symbol === '^')) {
+
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) {
+                return new ScalarType('i32')
+            }    
+
+            print_or_throw_error(`Type error; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
         }
+
+        // MODULO operation
+        if (symbol === '%') {
+            
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) {
+                return new ScalarType('i32')
+            } 
+            
+            print_or_throw_error(`Type error; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+        }
+
+        // else, other arithmetic operation
+        if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) { // no typecasting in our language
+            return new ScalarType(t1.TypeName)
+        } 
+        
+        print_or_throw_error(`Type error; Operator '${symbol}' requires matching numeric operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+
+        return new UnitType(); // prevent runtime error (return undefined)
     }
 
     // | expression ANDAND expression
