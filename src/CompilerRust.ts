@@ -677,7 +677,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.visit(body_ctx) // the environment will be extended and restored once more => done twice
         
         ce = compile_time_environment_restore(ce);
-        instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }
+
+        // no need to insert unit type. The value of function call is on the top of the OS at the end
+        // instrs[wc++] = { tag: "LDC", val: new UnitRustValue() } 
+        
         instrs[wc++] = { tag: "RESET" }
         goto_instruction.addr = wc
         log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
