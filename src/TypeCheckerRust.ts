@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
+import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
 import { LOGGING_ENABLED } from "./index.js";
 import { error } from "console";
 
@@ -245,15 +245,15 @@ export class RustTypeChecker {
     }
 }
 
-function log(message: any, enclosing_function: string): void {
+export function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
         console.log(`[${enclosing_function}] --- ${message}`)
     } 
 }
 
-function print_or_throw_error(msg: string) {
+export function print_or_throw_error(msg: string) {
     if (LOGGING_ENABLED) {
-        console.error("[ERROR] " + msg)
+        console.error("[!!!!!ERROR] " + msg)
     } else {
         throw new TypeError(msg);
     }
@@ -371,14 +371,20 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         te.restore_type_environment();
     }
 
+    canBeMoved(type: Type): boolean {
+        return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
+    }
+
     // ------------------------------ EXPRESSION ---------------------------------------------
 
     // leaf node: returns the type of literal value
     visitLiteralExpression(ctx: LiteralExpressionContext): Type {
+        if (ctx.STRING_LITERAL()) {
+            return new StringType()
+        }
+
         const type: ScalarTypeName = ctx.CHAR_LITERAL()
             ? "char"
-            // : ctx.STRING_LITERAL()
-            // ? "str" // TODO: which one are we implementing? String:: vs &str
             : ctx.FLOAT_LITERAL()
                 ? "f64"
                 : ctx.INTEGER_LITERAL()
@@ -413,6 +419,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
+
 
     // (AND | ANDAND) KW_MUT? expression
     visitBorrowExpression(ctx: BorrowExpressionContext): Type {
@@ -587,12 +594,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // An assignment that moves ownership of a variable is happening.
         // Function types cannot be moved.
-        if (!(actual_type instanceof ClosureType)) {
-            
+        if (this.canBeMoved(actual_type)) {
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`);
             } else {
                 actual_type.IsMoved = true;
+                if (actual_type instanceof RefType) actual_type.freeRef()
                 log(`MARKING RHS AS MOVED`, "ASSIGNMENT_EXPRESSION");
             }
 
@@ -646,22 +653,42 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 const expr = expressions[i]
                 const type = actual_arg_types[i]
                 // Case where variables passed to function argument leads to moving ownership
-                if (!(type instanceof ClosureType)) {
+                if (this.canBeMoved(type)) {
                     if (type.ImmutableBorrowCount > 0 || type.MutableBorrowExists) {
                         print_or_throw_error(`Type error in application; cannot move a borrowed value into function.`);
                     }
                     
                     type.IsMoved = true;
+                    if (type instanceof RefType) type.freeRef()
                     log(`MARKING ARGUMENT AT POSITION ${i} AS MOVED`, "CALL_EXPRESSION");
                 }
             }
         }
 
-        // clone the object return type so the ReturnType of the ClosureType 
-        // saved in environment is not destructively modified during ownership moving.
-        const return_type_original = expected_type.ReturnType
-        const return_type_clone = Object.assign(Object.create(Object.getPrototypeOf(return_type_original)), return_type_original)
-        return return_type_clone; 
+        // We can simply return type as for a function with return type as reftype
+        // invariant 1: it must take in at most a single reftype
+        // invariant 2: it must return the same reftype object taking in as argument
+        if (expected_type instanceof RefType) {
+            // for (const type of actual_arg_types) {
+            //     // update borrow status of underlying ref type again
+            //     if (type instanceof ImmutableRefType) {
+            //         type.InnerType.ImmutableBorrowCount++
+            //         return type
+            //     } else if (type instanceof MutableRefType) {
+            //         type.MutableBorrowExists = true
+            //         return type
+            //     }
+            // }
+            print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`)
+        } else {
+            // clone the object return type so the ReturnType of the ClosureType 
+            // saved in environment is not destructively modified during ownership moving.
+            // e.g. x = f(), y = x;
+            const return_type_original = expected_type.ReturnType
+            const return_type_clone = Object.assign(Object.create(Object.getPrototypeOf(return_type_original)), return_type_original)
+            return return_type_clone; 
+        }
+
     }
 
     visitArithmeticOrLogicalExpression(ctx: ArithmeticOrLogicalExpressionContext): Type {
@@ -691,22 +718,22 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // bitwise operation
         if ((symbol === '&') || (symbol === '|') || (symbol === '^')) {
-
-            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) {
-                return new ScalarType('i32')
-            }    
-
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) return new ScalarType('i32') 
             print_or_throw_error(`Type error in bitwise operation; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
         }
 
         // MODULO operation
         if (symbol === '%') {
-
-            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) {
-                return new ScalarType('i32')
-            } 
-            
+            if (compare_type(t1, t2) && (t1.TypeName === 'i32')) return new ScalarType('i32')
             print_or_throw_error(`Type error in modulo operation; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+        }
+
+        // overload "+" for strings
+        if (symbol === '+') {
+            if (t1.TypeName === 'string' && compare_type(t1, t2)) return new StringType()
+            if ((t1.TypeName === 'i32' || t1.TypeName === 'f64') && compare_type(t1, t2)) return new ScalarType(t1.TypeName)
+            print_or_throw_error(`Type error in addition operation; Add operator '${symbol}' requires matching i32/f64/string operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+
         }
 
         // else, other arithmetic operation
@@ -905,7 +932,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     visitTypeNoBounds(ctx: TypeNoBoundsContext): Type {
         if (ctx.traitObjectTypeOneBound()) { // primitive type
-            return new ScalarType(this.visitChildren(ctx));
+            const type_name: string = this.visitChildren(ctx)
+            if (type_name === "string") {
+                return new StringType()
+            }
+            return new ScalarType((type_name as ScalarTypeName))
         }
 
         if (ctx.tupleType()) { // unit type "()"
@@ -935,7 +966,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
 
-        let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
+        let ref_type: RefType = is_mut ? new MutableRefType(inner_type, undefined) : new ImmutableRefType(inner_type, undefined);
         return ref_type;
     }
 
@@ -995,9 +1026,24 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // )
     // ;
 
-    // TODO: a function that returns a reference must return a reference that it took as a param (compare inner)
+
     // TODO: a function can only take up to one reference as a param (avoid needing to annotate lifetime)
+    // if returns borrow, check it only take in one ref and is the same
     visitFunction_(ctx: Function_Context): Type {
+        function findBorrowParam(expected_param_types: Type[]): Type {
+            let borrow_param: Type
+            for (let i = 0; i < expected_param_types.length; i++) {
+                const type = expected_param_types[i]
+                if (!(type instanceof RefType)) {
+                    continue
+                }
+                if (borrow_param) {
+                    print_or_throw_error("Type error in function declaration; Function parameter can only have one reference type as lifetime annotation not supplied/supported.")
+                }
+                borrow_param = type
+            }
+            return borrow_param
+        }
 
         // read type declarations for the function
         const symbol: string = this.visit(ctx.identifier());
@@ -1020,7 +1066,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             const function_param = ctx.functionParameters().functionParam(i);
 
             if (!function_param.functionParamPattern()) {
-                print_or_throw_error("Function parameters must have their types declared.")
+                print_or_throw_error("Type error in function declaration; Function parameters must have their types declared.")
                 return new UnitType();
             }
 
@@ -1040,6 +1086,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         let body_type = this.visit(ctx.blockExpression())
         body_type = body_type instanceof ReturnType ? body_type.ReturnedType : body_type // unwrap return type
         log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
+
+        // check that a function that returns a reftype takes in at most one reference as argument and returns that argument
+        if (expected_return_type instanceof RefType) {
+            const borrow_param = findBorrowParam(expected_param_types)
+            if ((borrow_param as RefType).InnerType != body_type.InnerType) {
+                print_or_throw_error(`Type error in function declaration; Function returns a locally declared reference.`)
+            }
+        }
 
         te.restore_type_environment()
 
@@ -1151,13 +1205,14 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         }
 
         // Ownership moving. Do not allow moving ownership of closure(fn) type.
-        if (!(expected_type instanceof ClosureType)) {
+        if (this.canBeMoved(expected_type)) {
 
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
             }
             
             actual_type.IsMoved = true;
+            if (actual_type instanceof RefType) actual_type.freeRef()
             log(`Moved ownership into variable ${symbol}`, "LET_STATEMENT");
         }
 

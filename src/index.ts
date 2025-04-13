@@ -37,177 +37,6 @@ import { RustCompiler } from './CompilerRust.js';
 import { RustTypeChecker } from './TypeCheckerRust.js';
 import { RustVirtualMachine } from './VirtualMachineRust.js';
 
-const chunk = `
-fn main() {
-    // fn pass1() -> i32 {
-    //     if (true) {
-    //         6
-    //     } else {
-    //         7
-    //     }
-    // }
-
-    // fn pass2() -> i32 {
-    //     if (true) {
-    //         6;
-    //     } else {
-    //         7;
-    //     }
-    //     return 1;
-    // }
-
-    // fn pass3() -> i32 {
-    //     if (true) {
-    //         return 6;
-    //     } else {
-    //         return 7;
-    //     }
-    // }
-
-    // fn pass3_1() -> i32 {
-    //     let mut x: i32 = pass3();
-    //     x = pass3() + 1;
-    //     x = pass3() + pass3() + x;
-    //     let mut y: i32 = pass3() + pass3();
-    //     y = y + x;
-    //     let TEST: i32 = 100;
-    //     {
-    //         // y = TEST;
-    //         let z: i32 = TEST;
-    //     }
-    //     // x = TEST;
-    //     return y;
-    // }
-
-    // fn pass4() -> i32 {
-    //     fn f8() -> bool {
-    //         return false;
-    //     }
-    //     if (true) {
-    //         if (true) {
-    //             return 4;
-    //         } else {
-    //             return 5;
-    //         }
-    //     } else if (true) {
-    //         return 6;
-    //     } else {
-    //         return 7;
-    //     }
-    //     return 111111;
-    // }
-    
-
-    // fn pass5() -> i32 {
-    //     let mut x: i32 = if (true) { 6 } else { 7 };
-    //     return x;
-    // }
-
-    // SHOULD ERROR
-    // fn fail1() -> i32 {
-    //     if (true) {
-    //         return 6;
-    //     } else {
-    //         7
-    //     }
-    // }
-
-    // SHOULD ERROR
-    // fn fail2() -> i32 {
-    //     if (true) {
-    //         6;
-    //     } else {
-    //         return 7;
-    //     }
-    //     return 1;
-    // }
-
-    // SHOULD ERROR
-    // fn fail3() -> i32 {
-    //     if (true) {
-    //         return false;
-    //     } else {
-    //         return 7;
-    //     }
-    //     return 1;
-    // }
-
-    // SHOULD ERROR
-    // fn fail4() -> i32 {
-    //     if (true) {
-    //         return false
-    //     } else {
-    //         7;
-    //     }
-    //     return 1;
-    // }
-
-    // SHOULD ERROR
-    // fn fail5() -> i32 {
-    //     let mut y: i32 = return 6;
-    // }
-    
-    // fn pass_ref_1() -> () {
-    //     let x : i32 = 42;
-    //     let x_ref : &i32 = &x; // borrow
-    //     let x_ref_2 : &i32 = x_ref; // move a borrow
-    //     *x_ref_2; 
-    // }
-
-    // fn fail_ref_1() -> () {
-    //     let x : i32 = 2;
-    //     let x_ref : &i32 = &x;
-    //     let x_ref_2 : &i32 = x_ref;
-    //     *x_ref; // cannot deref a moved var
-    // }
-
-    fn pass_deref_assign() {
-        let mut x: i32 = 42;
-        let x_ref: &mut i32 = &mut x;
-        *x_ref = 69;
-        ((*x_ref)) = 69;
-    }
-
-    fn fail_deref_assign() {
-        let mut x: i32 = 42;
-        let x_ref: &i32 = &x;
-        *x_ref = 69;
-        ((*x_ref)) = 69;
-    }
-}
-`
-
-const conditionals_test = `
-fn main() {
-
-    if (true) {
-        1;
-    } // no else branch
-
-    fn validate(x: i32) -> bool {
-        return x >= 2;
-    }
-
-    const x : i32 = 5;
-    if (x < 2) { // comparisonExpression
-        return x;
-    } else if (validate(x)) { // functionCall + another if expression after else
-        return x;
-    } else {
-        return x;
-    }
-}
-`
-
-const while_test = `
-fn main() {
-    let mut x : i32 = 0;
-    while x < 5 {
-        x = x + 1;
-    }
-}
-`
-
 export let LOGGING_ENABLED = false;
 const test_typechecker = (code: string, expected_error: string, enable_log?: boolean) => {
 
@@ -279,7 +108,7 @@ fn pass1() -> i32 {
         7
     }
 }
-`, "", true); // enable log for this specific test case
+`, "")
 
 test_typechecker(`
 fn pass2() -> i32 {
@@ -416,12 +245,22 @@ fn fail4() -> i32 {
 // Use of moved reference
 test_typechecker(`
 fn fail_ref_1() -> () {
-let x : i32 = 2;
-let x_ref : &i32 = &x;
-let x_ref_2 : &i32 = x_ref;
-*x_ref;
+    let mut x : string = "2";
+    let x_ref : &mut string = &mut x;
+    let x_ref_2 : &mut string = x_ref;
+    *x_ref;
 }
 `, "Type error in pathExpression; use of a moved value: x_ref");
+
+// Immutable reference is not moved
+test_typechecker(`
+    fn pass_ref_1() -> () {
+        let x : string = "2";
+        let x_ref : & string = & x;
+        let x_ref_2 : & string = x_ref;
+        *x_ref;
+    }
+    `, "");
 
 // Assignment to immutable reference
 test_typechecker(`
@@ -432,6 +271,7 @@ fn fail_deref_assign() {
     ((*x_ref)) = 69;
 }
 `, "Type error in assignment; cannot assign to a dereference of an immutable reference");
+
 
 test_typechecker(`
 fn fail_lookup_scope() {
@@ -520,6 +360,71 @@ fn fail_compare_i32_with_bool_or_char() {
     x < true && x >= 'a';
 }
 `, "Type error in comparison expression") 
+
+
+test_typechecker(`
+    fn pass_nested_borrows() {
+        let mut x: string = "123";
+        {
+            {
+                let x_ref_1: &mut string = &mut x;
+            }
+            let x_ref_2: &mut string = &mut x;
+        }
+        let x_ref_3: &mut string = &mut x;
+    }
+    `, "") 
+
+test_typechecker(`
+    fn pass_function_ref_param() {
+        fn test(a: &mut string) -> &mut string {
+            return a;
+        }        
+    }
+    `, "") 
+
+
+test_typechecker(`
+    fn fail_fn_no_return_ref() {
+        fn test(a: &mut string) -> &mut string {
+            let new_ref: &mut string = &mut"123";
+            return new_ref;
+        }
+    }
+    `, "Type error in function declaration; Function returns a locally declared reference.") 
+
+
+test_typechecker(`
+    fn fail_fn_too_many_ref_param() {
+        fn test(a: &mut string, b: &mut string) -> &mut string {
+            return a;
+        }
+    }
+    `, "Type error in function declaration; Function parameter can only have one reference type as lifetime annotation not supplied/supported.") 
+
+test_typechecker(`
+    fn pass_ref_inner_type_consistent() {
+        fn test(a: &mut string) -> &mut string {
+            return a;
+        }        
+        let mut x: string = "123";
+        let mut x_ref: &mut string = &mut x;
+        test(x_ref); // move x_ref into function
+        let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
+    }
+    `, "")
+    
+test_typechecker(`
+    fn fail_ref_inner_type_consistent() {
+        fn test(a: &mut string) -> &mut string {
+            return a;
+        }        
+        let mut x: string = "123";
+        let mut x_ref: &mut string = &mut x;
+        x_ref = test(x_ref); // move x_ref into function
+        let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
+    }
+    `, "", true) // TODO: this should fail?
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);
