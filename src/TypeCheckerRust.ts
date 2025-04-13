@@ -707,7 +707,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // MODULO operation
         if (symbol === '%') {
-            
+
             if (compare_type(t1, t2) && (t1.TypeName === 'i32')) {
                 return new ScalarType('i32')
             } 
@@ -767,11 +767,31 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                                 : print_or_throw_error('Unknown comparison operator');
 
         log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
-        if (compare_type(t1, t2) && (t1.TypeName === 'i32' || t1.TypeName === 'f64')) {
-            return new ScalarType("bool")
-        } else {
-            print_or_throw_error(`Type error; Operator '${symbol}' requires matching numeric operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+
+        switch (symbol) {
+            case ">=":
+            case "<=":
+            case "<":
+            case ">":
+                const valid_type1 = (t1.TypeName === 'i32' || t1.TypeName === 'f64');
+                const valid_type2 = (t2.TypeName === 'i32' || t2.TypeName === 'f64');
+                if (!valid_type1 || !valid_type2) {
+                    print_or_throw_error(
+                        `Type error; Operator '${symbol}' requires matching numeric operands, ` + 
+                        `found ${unparse_type(t1)} and ${unparse_type(t2)}`);
+                } 
+                break;
+
+            case "===": 
+            case "!==": 
+                // All types are allowed for equality comparison
+                break;
+
+            default:
+                print_or_throw_error(`Unsupported operator: '${symbol}'`);
         }
+
+        return new ScalarType("bool");
     }
 
     // (MINUS | NOT) expression
