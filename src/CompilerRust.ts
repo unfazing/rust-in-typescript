@@ -229,7 +229,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './CompileTimeEnvRust.js';
+import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment, symbol_exist_in_compile_time_env } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
 
@@ -268,29 +268,50 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         ctx.item().forEach(item => {
             log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
             
-            if (item.visItem()) {
-                const visItem = item.visItem();
-                
-                if (visItem.function_()) {
-                    const symbol = this.visit(visItem.function_().identifier());
-                    log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
-                    locals.push(symbol);
-                }
-                else if (visItem.constantItem()) {
-                    const symbol = this.visit(visItem.constantItem().identifier());
-                    log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
-                    locals.push(symbol);
-                } else {
-                    // throw error
-                }
+            const visItem = item.visItem();
+
+            if (!visItem || !(visItem.function_() || visItem.constantItem()) ) {
+                throw new Error("Compiler error; this item is not implemented;")
+            }
+
+            
+            if (visItem.function_()) {
+                const symbol = this.visit(visItem.function_().identifier());
+                log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
+                locals.push(symbol);
+            }
+            else if (visItem.constantItem()) {
+                const symbol = this.visit(visItem.constantItem().identifier());
+                log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
+                locals.push(symbol);
             }
         });
 
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }
         ce = compile_time_environment_extend(locals, ce)
         log(`ENVIRONMENT: ${ce}`, "CRATE")
-        this.visitChildren(ctx);
-        instrs[wc++] = { tag: "EXIT_SCOPE" }
+        
+        ctx.item().forEach(item => {
+
+            log(`VISITING ITEM: ${item}`, "CRATE")
+            this.visit(item);            
+
+            // pop the value of this item right after; we dont need it in global scope
+            instrs[wc++] = { tag: "POP" } 
+        });
+
+        // call main() function if it exists
+        if (symbol_exist_in_compile_time_env(ce, "main")) {
+            instrs[wc++] = {
+                tag: "LD",
+                sym: "main",
+                pos: compile_time_environment_position(ce, "main")
+            }
+
+            instrs[wc++] = { tag: "CALL", arity: 0 } // TODO: disallow main from taking in arguments
+        }
+
+        instrs[wc++] = { tag: "EXIT_SCOPE" } // TODO: exit scope should not deallocate addr on OS
         instrs[wc] = { tag: "DONE" }
         ce = compile_time_environment_restore(ce)
 
@@ -413,7 +434,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         // a single expression
         if (ctx.statement().length === 0 && ctx.expression()) {
             log(`Visiting the only expression: ${ctx.expression().getText()}`, "STATEMENTS")
-            return this.visit(ctx.expression());
+            return this.visit(ctx.expression()); // terminate early
         }
 
         // else, statement+ expression?
@@ -639,7 +660,6 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         };
     }
 
-
     insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {
         log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
         let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
@@ -663,6 +683,28 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")
     }
 
+    // expressionStatement
+    // : expression SEMI
+    // | expressionWithBlock SEMI?
+    // ;
+    visitExpressionStatement(ctx: ExpressionStatementContext) {
+        if (ctx.expression()) { // SEMI always exists
+            this.visit(ctx.expression());
+        
+        } else if (ctx.expressionWithBlock()) {
+            this.visit(ctx.expressionWithBlock())
+        }
+
+        // pop the value of the expression from OS, then load Unit value
+        if (ctx.SEMI()) {
+            instrs[wc++] = { tag: "POP" };
+            instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }
+        }
+    }
+
+    // expressionWithBlock: blockExpression | ifExpression | loopExpression 
+    // 
+    // loopExpression: PredicateLoopExpression
 
     // TODO: MUST ASSIGN VALUE TO VARIABLE?
     // letStatement

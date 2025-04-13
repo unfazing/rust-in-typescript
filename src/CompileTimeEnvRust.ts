@@ -44,6 +44,16 @@ const value_index = (frame, x) => {
 	return -1;
 };
 
+export const symbol_exist_in_compile_time_env = (env: string[][], symbol: string) => {
+	for (let i = env.length - 1; i >= 0; i--) {
+		if (value_index(env[i], symbol) !== -1) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 // in this machine, the builtins take their
 // arguments directly from the operand stack,
 // to save the creation of an intermediate
