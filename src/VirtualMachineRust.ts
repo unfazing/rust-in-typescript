@@ -1,6 +1,7 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
+import { start } from "repl";
 
 // (2) no loops and arrays
 
@@ -22,6 +23,189 @@ const push = (array, ...items) => {
 // without changing the array
 const peek = (array, address) => array.slice(-1 - address)[0];
 
+
+/* *************************
+ * Stack
+ * *************************/
+
+class Stack {
+
+	private stack: DataView;
+
+	private start_addr: number; 	// lower bound
+	private end_addr: number; 		// upper bound
+	private size_offset: number; 	// number of offset bytes in the first word
+
+	private SP: number; 			// Stack Pointer register maintained by Stack class
+
+	constructor(bytes: number, starting_address: number) {
+		if (bytes % word_size !== 0) 
+			error(`Stack size must be divisible by ${word_size}`);
+
+		if (starting_address % word_size !== 0) 
+			error(`Starting address of stack must be divisible by ${word_size}`)
+
+		const data = new ArrayBuffer(bytes);
+		const view = new DataView(data);
+		this.stack = view;
+
+		this.start_addr = starting_address;
+		this.end_addr = starting_address + (bytes / word_size)
+		this.size_offset = 5; 
+
+		this.SP = starting_address;
+	}
+
+	// Must save FP (Frame Pointer) on the CallFrame (in the RTS) to pop the stack.
+	// "clean" mem by moving SP to FP
+	pop(FP: number) {
+		this.SP = FP; 
+	}
+
+	is_out_of_range(address: number): boolean {
+		return address < this.start_addr || address >= this.end_addr;
+	}
+
+	convert_to_virtual_addr(address: number): number {
+		return address % this.start_addr;
+	}
+
+	// allocate "size" number of words on the stack
+	allocate(tag: number, size: number) {
+
+		const address = this.SP;
+		
+		// allocate (size) number of words
+		this.SP += size;
+
+		if (this.is_out_of_range(this.SP)) {
+			throw new Error("Stack out of space")
+		}
+
+		const virtual_address = this.convert_to_virtual_addr(address);
+
+		// set the first byte to tag
+		this.stack.setUint8(virtual_address * word_size, tag);
+
+		// number of children = size - 1
+		this.stack.setUint16(virtual_address * word_size + this.size_offset, size); 
+
+		return address;
+	};
+
+	// Remember to convert to virtual address first before any raw byte operation on the ByteArray.
+	// e.g. this.stack.get/set()...
+
+	// get a word in the stack at given address.
+	get(address: number) {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		return this.stack.getFloat64(virtual_address * word_size);
+	}
+
+	// set a word in the stack at given address.
+	set(address: number, x) {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		this.stack.setFloat64(virtual_address * word_size, x);
+	}
+
+	// child index starts at 0
+	get_child(address: number, child_index: number) {
+        return this.get(address + 1 + child_index);
+    }
+
+	set_child(address: number, child_index: number, value: number) {
+        this.set(address + 1 + child_index, value);
+    }
+
+    get_tag(address: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        return this.stack.getUint8(virtual_address * word_size);
+    }
+
+    get_size(address: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        return this.stack.getUint16(virtual_address * word_size + this.size_offset); 
+    }
+
+    get_number_of_children(address: number) {
+        return this.get_tag(address) === Number_tag 
+			? 0 
+			: this.get_size(address) - 1;
+    }
+
+    set_byte_at_offset(address: number, offset: number, value: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        this.stack.setUint8(virtual_address * word_size + offset, value);
+    }
+
+    get_byte_at_offset(address: number, offset: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        return this.stack.getUint8(virtual_address * word_size + offset);
+    }
+
+    set_2_bytes_at_offset(address: number, offset: number, value: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        this.stack.setUint16(virtual_address * word_size + offset, value);
+    }
+
+    get_2_bytes_at_offset(address: number, offset: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        return this.stack.getUint16(virtual_address * word_size + offset);
+    }
+
+    set_4_bytes_at_offset(address: number, offset: number, value: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        this.stack.setUint32(virtual_address * word_size + offset, value);
+    }
+
+    get_4_bytes_at_offset(address: number, offset: number) {
+        const virtual_address = this.convert_to_virtual_addr(address);
+        return this.stack.getUint32(virtual_address * word_size + offset);
+    }
+
+
+	// allocation of primitive types
+
+	allocate_False(): number {
+		return this.allocate(False_tag, 1); 
+	}
+
+	is_False(address): boolean {
+		return this.get_tag(address) === False_tag
+	}
+
+	allocate_True(): number {
+		return this.allocate(True_tag, 1); 
+	}
+
+	is_True(address): boolean {
+		return this.get_tag(address) === True_tag
+	}
+
+	allocate_Undefined(): number {
+        return this.allocate(Undefined_tag, 1);
+    }
+
+    is_Undefined(address: number): boolean {
+        return this.get_tag(address) === Undefined_tag;
+    }
+
+    allocate_Number(n: number): number {
+        const number_address = this.allocate(Number_tag, 2);
+        this.set(number_address + 1, n);
+        return number_address;
+    }
+
+    is_Number(address: number): boolean {
+        return this.get_tag(address) === Number_tag;
+    }
+
+	// TODO: allocate char?
+}
+
+const stack_size = 1000000; // 125000 word addresses
+const stack_starting_addr = 1000000; // assuming heap ends at address 999999 for now
+const STACK = new Stack(stack_size, stack_starting_addr)
 
 /* *************************
  * HEAP
@@ -70,9 +254,16 @@ let free = 0;
 const size_offset = 5;
 const heap_allocate = (tag, size) => {
 	const address = free;
+	
+	// allocate (size) number of words
 	free += size;
+
+	// set the first byte to tag
 	HEAP.setUint8(address * word_size, tag);
-	HEAP.setUint16(address * word_size + size_offset, size);
+
+	// number of children = size - 1
+	HEAP.setUint16(address * word_size + size_offset, size); 
+
 	return address;
 };
 
@@ -258,7 +449,8 @@ const heap_get_Builtin_id = (address) => heap_get_byte_at_offset(address, 1);
 // closure
 // [1 byte tag, 1 byte arity, 2 bytes pc, 1 byte unused,
 //  2 bytes #children, 1 byte unused]
-// followed by the address of env
+// followed by the address of env => closure has environment capture, but Rust fn does not.
+
 // note: currently bytes at offset 4 and 7 are not used;
 //   they could be used to increase pc and #children range
 
@@ -584,7 +776,10 @@ let OS; 	// JS array (stack) of words (Addresses, word-encoded literals, numbers
 let PC; 	// JS number
 let E; 		// heap Address
 let RTS; 	// JS array (stack) of Addresses
-HEAP; 		// (declared above already)
+
+// Memory
+HEAP; 		// declared above
+STACK; 		// declared above
 
 const microcode = {
 	LDC: (instr) => push(OS, JS_value_to_address(instr.val)),
