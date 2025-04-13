@@ -4,6 +4,7 @@
 
 import { assert } from "console";
 import { print_error } from "./Utils.js"
+import { log, print_or_throw_error } from "./TypeCheckerRust.js";
 
 /* **********************
  * using arrays as stacks
@@ -45,8 +46,8 @@ export class TypeEnvironment {
     }
     
     // pop the last frame from the type environment
-    private pop() {
-        this.type_environment.pop()
+    private pop(): TypeFrame {
+        return this.type_environment.pop()
     }
 
     // get the last frame from the type environment
@@ -97,8 +98,15 @@ export class TypeEnvironment {
 
     // pop the last (most recent) frame
     restore_type_environment() {
-        // TODO: add logic to update borrow status before popping
-        this.pop() 
+        let removed_frame: TypeFrame = this.pop()
+        
+        for (let x in removed_frame.frame) {
+            // log(`[restore_type_environment] checking ${x}`, "Type Environment")
+            const type: Type = removed_frame.frame[x]
+            if (type instanceof RefType && !type.IsMoved) {
+                type.freeRef()
+            }
+        }
     }
 
     add_symbol_to_current_frame(symbol: string, type: Type) {
@@ -155,7 +163,7 @@ const empty_type_environment = []
 export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" 
+export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" | "string"
 
 // Type is a class
 // TypeName is a string. 
@@ -207,29 +215,44 @@ export class ClosureType extends Type {
     }
 }
 
+export class StringType extends Type {
+    constructor(is_mut?: boolean) {
+        super()
+        this.IsMutable = is_mut
+        this.TypeName = "string"
+    }
+}
+
 export abstract class RefType extends Type {
     InnerType: Type
-    OriginalSymbol: string
     constructor() {
         super()
         this.TypeName = "refType"
     }
+
+    freeRef() {
+        if (this instanceof ImmutableRefType) {
+            this.InnerType.ImmutableBorrowCount--
+        }
+
+        if (this instanceof MutableRefType) {
+            this.InnerType.MutableBorrowExists = false
+        }
+    }
 }
 
 export class ImmutableRefType extends RefType {
-    constructor(innerType: Type, originalSymbol?: string, is_mut?: boolean, ) {
+    constructor(innerType: Type, is_mut?: boolean, ) {
         super()
         this.InnerType = innerType
-        this.OriginalSymbol = originalSymbol
         this.IsMutable = is_mut
     }
 }
 
 export class MutableRefType extends RefType {
-    constructor(innerType: Type, originalSymbol?: string, is_mut?: boolean, ) {
+    constructor(innerType: Type, is_mut?: boolean, ) {
         super()
         this.InnerType = innerType
-        this.OriginalSymbol = originalSymbol
         this.IsMutable = is_mut
     }
 }
@@ -281,6 +304,10 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     // Compare Scalars
     if (t1 instanceof ScalarType) {
         return t1.TypeName === t2.TypeName;
+    }
+
+    if (t1 instanceof StringType && t2 instanceof StringType) {
+        return true
     }
 
     if (t1 instanceof UnitType) {
@@ -340,7 +367,7 @@ export const unparse_type = (t: Type): string => {
     }
 
     // Handle primitive types (string case)
-    if (t instanceof ScalarType) {
+    if (t instanceof ScalarType || t instanceof StringType) {
         return moved_str + t.TypeName + borrow_str;
     }
 
