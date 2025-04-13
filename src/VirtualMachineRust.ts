@@ -1,6 +1,6 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
-import { BooleanRustType, CharRustType, F64RustType, StringRustType, UnitRustType } from "./Utils";
+import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
 import { start } from "repl";
 
 // (2) no loops and arrays
@@ -56,7 +56,7 @@ class Stack {
 		this.SP = starting_address;
 	}
 
-	// Must save FP (Frame Pointer) on the CallFrame (in the RTS) to pop the stack.
+	// Must save FP (Frame Pointer) on the CallFrame AND blockFrame (in the RTS) to pop the stack.
 	// "clean" mem by moving SP to FP
 	pop(FP: number) {
 		this.SP = FP; 
@@ -128,10 +128,9 @@ class Stack {
     }
 
     get_number_of_children(address: number) {
-        return this.get_tag(address) === Number_tag 
-			? 0 
-			: this.get_size(address) - 1;
-    }
+		const tag = this.get_tag(address);
+		return [I32_tag, F64_tag, Char_tag].includes(tag) ? 0 : this.get_size(address) - 1;
+	}
 
     set_byte_at_offset(address: number, offset: number, value: number) {
         const virtual_address = this.convert_to_virtual_addr(address);
@@ -170,7 +169,7 @@ class Stack {
 		return this.allocate(False_tag, 1); 
 	}
 
-	is_False(address): boolean {
+	is_False(address: number): boolean {
 		return this.get_tag(address) === False_tag
 	}
 
@@ -178,33 +177,66 @@ class Stack {
 		return this.allocate(True_tag, 1); 
 	}
 
-	is_True(address): boolean {
+	is_True(address: number): boolean {
 		return this.get_tag(address) === True_tag
 	}
 
-	allocate_Undefined(): number {
-        return this.allocate(Undefined_tag, 1);
+	allocate_Unit(): number {
+        return this.allocate(Unit_tag, 1);
     }
 
-    is_Undefined(address: number): boolean {
-        return this.get_tag(address) === Undefined_tag;
+    is_Unit(address: number): boolean {
+        return this.get_tag(address) === Unit_tag;
     }
 
-    allocate_Number(n: number): number {
-        const number_address = this.allocate(Number_tag, 2);
-        this.set(number_address + 1, n);
+    allocate_I32(x: I32RustValue): number {
+        const number_address = this.allocate(I32_tag, 2);
+        this.set(number_address + 1, x.val);
         return number_address;
     }
 
-    is_Number(address: number): boolean {
-        return this.get_tag(address) === Number_tag;
+    is_I32(address: number): boolean {
+        return this.get_tag(address) === I32_tag;
     }
 
-	// TODO: allocate char?
+	get_I32(address: number): I32RustValue {
+		return new I32RustValue(STACK.get(address + 1)); // second word in i32 node stores the number
+	}
+
+	allocate_F64(x: F64RustValue): number {
+        const number_address = this.allocate(F64_tag, 2);
+        this.set(number_address + 1, x.val);
+        return number_address;
+    }
+
+    is_F64(address: number): boolean {
+        return this.get_tag(address) === F64_tag;
+    }
+
+	get_F64(address: number): F64RustValue {
+		return new I32RustValue(STACK.get(address + 1)); // second word in f64 node stores the number
+	}
+
+	allocate_Char(x: CharRustValue): number {
+        const number_address = this.allocate(Char_tag, 2);
+        this.set(number_address + 1, x.val.charCodeAt(0)); // store the Unicode of char as number
+        return number_address;
+    }
+
+	get_Char(address: number): CharRustValue {
+		const codePoint = this.get(address + 1); // Retrieve the stored number
+    	return new CharRustValue(String.fromCharCode(codePoint)); // convert Unicode to char
+	}
+
+	is_Char(address: number): boolean {
+        return this.get_tag(address) === Char_tag;
+	}
+
+	// TODO: allocate reference
 }
 
-const stack_size = 1000000; // 125000 word addresses
-const stack_starting_addr = 1000000; // assuming heap ends at address 999999 for now
+const stack_size = 1000000; 			// 125000 word addresses
+const stack_starting_addr = 1000000; 	// assuming heap ends at address 999999 for now
 const STACK = new Stack(stack_size, stack_starting_addr)
 
 /* *************************
@@ -285,10 +317,7 @@ const heap_get_size = (address) =>
 	HEAP.getUint16(address * word_size + size_offset);
 
 // the number of children is one less than the size
-// except for number nodes:
-//                 they have size 2 but no children
-const heap_get_number_of_children = (address) =>
-	heap_get_tag(address) === Number_tag ? 0 : heap_get_size(address) - 1;
+const heap_get_number_of_children = (address) => heap_get_size(address) - 1;
 
 // access byte in heap, using address and offset
 const heap_set_byte_at_offset = (address, offset, value) =>
@@ -304,11 +333,10 @@ const heap_set_2_bytes_at_offset = (address, offset, value) =>
 const heap_get_2_bytes_at_offset = (address, offset) =>
 	HEAP.getUint16(address * word_size + offset);
 
-// ADDED CHANGE
+// access 4 bytes in heap, using address and offset
 const heap_set_4_bytes_at_offset = (address, offset, value) =>
 	HEAP.setUint32(address * word_size + offset, value);
 
-// ADDED CHANGE
 const heap_get_4_bytes_at_offset = (address, offset) =>
 	HEAP.getUint32(address * word_size + offset);
 
@@ -325,55 +353,52 @@ const word_to_string = (word) => {
 	return binStr;
 };
 
-// values
-
-// All values are allocated on the heap as nodes. The first
+// Values:
+//
+// All values are allocated in the memory as nodes. The first
 // word of the node is a header, and the first byte of the
 // header is a tag that identifies the type of node
+//
+// Primitives are stored on the stack, the rest on the heap.
 
-const False_tag = 0;
-const True_tag = 1;
-const Number_tag = 2;
-const Null_tag = 3;
-const Unassigned_tag = 4;
-const Undefined_tag = 5;
-const Blockframe_tag = 6;
-const Callframe_tag = 7;
-const Closure_tag = 8;
-const Frame_tag = 9;
-const Environment_tag = 10;
-const Pair_tag = 11;
-const Builtin_tag = 12;
-const String_tag = 13; // ADDED CHANGE
-const Reference_tag = 14;
+const False_tag 		= 0;
+const True_tag 			= 1;
+const I32_tag 			= 2;
+const F64_tag 			= 3;
+const Unit_tag 			= 4; // equivalent to undefined
+const Char_tag 			= 5;
+const Blockframe_tag 	= 6;
+const Callframe_tag 	= 7;
+const Closure_tag 		= 8;
+const Frame_tag 		= 9;
+const Environment_tag 	= 10;
+const Pair_tag 			= 11;
+const Builtin_tag 		= 12;
+const String_tag 		= 13; 
+const Reference_tag 	= 14;
+
 
 // Record<string, tuple(number, string)< where the key is the hash of the string
 // and the value is a tuple of the address of the string and the string itself
 let stringPool = {}; // ADDED CHANGE
 
-// all values (including literals) are allocated on the heap.
 
 // We allocate canonical values for
-// true, false, undefined, null, and unassigned
+// true, false, unit (undefined)
 // and make sure no such values are created at runtime
-
+//
 // boolean values carry their value (0 for false, 1 for true)
 // in the byte following the tag
-const False = heap_allocate(False_tag, 1);
-const is_False = (address) => heap_get_tag(address) === False_tag;
-const True = heap_allocate(True_tag, 1);
-const is_True = (address) => heap_get_tag(address) === True_tag;
+const False = STACK.allocate_False();
+const is_False = (address) => STACK.is_False(address);
+
+const True = STACK.allocate_True();
+const is_True = (address) => STACK.is_True(address);
 
 const is_Boolean = (address) => is_True(address) || is_False(address);
 
-const Null = heap_allocate(Null_tag, 1);
-const is_Null = (address) => heap_get_tag(address) === Null_tag;
-
-const Unassigned = heap_allocate(Unassigned_tag, 1);
-const is_Unassigned = (address) => heap_get_tag(address) === Unassigned_tag;
-
-const Undefined = heap_allocate(Undefined_tag, 1);
-const is_Undefined = (address) => heap_get_tag(address) === Undefined_tag;
+const Unit = STACK.allocate_Unit();
+const is_Unit = (address) => STACK.is_Unit(address);
 
 // ADDED CHANGE
 // strings:
@@ -579,34 +604,11 @@ const heap_Environment_extend = (frame_address, env_address) => {
 // 	}
 // };
 
-// pair
-// [1 byte tag, 4 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// followed by head and tail addresses, one word each
-const heap_allocate_Pair = (hd, tl) => {
-	const pair_address = heap_allocate(Pair_tag, 3);
-	heap_set_child(pair_address, 0, hd);
-	heap_set_child(pair_address, 1, tl);
-	return pair_address;
-};
-
-
-const is_Pair = (address) => heap_get_tag(address) === Pair_tag;
-
-// number
+// number (I32 / F64)
 // [1 byte tag, 4 bytes unused,
 //  2 bytes #children, 1 byte unused]
 // followed by the number, one word
 // note: #children is 0
-
-const heap_allocate_Number = (n) => {
-	const number_address = heap_allocate(Number_tag, 2);
-	heap_set(number_address + 1, n);
-	return number_address;
-};
-
-const is_Number = (address) => heap_get_tag(address) === Number_tag;
-
 
 // reference
 // [1 byte tag, 4 bytes, unused,
@@ -614,10 +616,10 @@ const is_Number = (address) => heap_get_tag(address) === Number_tag;
 // followed by the address of the underlying value
 // then the address of referenced variable
 const heap_allocate_Reference = (address) => {
-	const reference_address = heap_allocate(Number_tag, 2);
-	heap_set(reference_address + 1, heap_get(address)) // underlying value
-	heap_set(reference_address + 2, address); // referenced variable
-	return reference_address;
+	// const reference_address = heap_allocate(Number_tag, 2);
+	// heap_set(reference_address + 1, heap_get(address)) // underlying value
+	// heap_set(reference_address + 2, address); // referenced variable
+	// return reference_address;
 }
 
 const heap_get_underlying_value = (address) => heap_get(address + 1);
@@ -627,79 +629,78 @@ const heap_get_referenced_variable = (address) => heap_get(address + 2);
 const is_Reference = (address) => heap_get_tag(address) === Reference_tag;
 
 //
-// conversions between addresses and JS_value
+// conversions between addresses and Rust Value
 //
 
-const address_to_JS_value = (x) =>
-	is_Boolean(x)
-		? is_True(x)
-			? true
-			: false
-		: is_Number(x)
-		? heap_get(x + 1)
-		: is_Undefined(x)
-		? undefined
-		: is_Unassigned(x)
-		? "<unassigned>"
-		: is_Null(x)
-		? null
-		: is_String(x) // ADDED CHANGE
-		? heap_get_string(x) // ADDED CHANGE
-		: is_Pair(x)
-		? [
-				address_to_JS_value(heap_get_child(x, 0)),
-				address_to_JS_value(heap_get_child(x, 1)),
-		  ]
-		: is_Closure(x)
-		? "<closure>"
-		: is_Builtin(x)
-		? "<builtin>"
-		: is_Reference(x)
-		? "<reference>" // TODO: check if this is right
-		: "unknown word tag: " + word_to_string(x);
+const is_stack_address = (address: number): boolean => (address >= stack_starting_addr)
 
-const JS_value_to_address = (x) =>
-	x instanceof BooleanRustType
-		? x
-			? True
-			: False
-		: x instanceof F64RustType
-		? heap_allocate_Number(x)
-		: x instanceof UnitRustType
-		? Undefined
-		// TODO: add heap allocate functions for i32 Rust Type
-		// : is_null(x)
-		// ? Null // no null value in rust
-		: x instanceof StringRustType || x instanceof CharRustType // ADDED CHANGE
-		? heap_allocate_String(x) // ADDED CHANGE
-		// : is_pair(x)
-		// ? heap_allocate_Pair(
-		// 		JS_value_to_address(head(x)),
-		// 		JS_value_to_address(tail(x)),
-		//   )
-		: "unknown word tag: " + word_to_string(x);
+const address_to_Rust_value = (address: number): RustValue => {
 
+	let value: RustValue | undefined;
+
+	if (is_stack_address(address)) {
+
+		value = STACK.is_False(address)
+			? new BooleanFalseRustValue()
+			: STACK.is_True(address)
+			? new BooleanTrueRustValue()
+			: STACK.is_I32(address)
+			? STACK.get_I32(address)
+			: STACK.is_F64(address)
+			? STACK.get_F64(address)
+			: STACK.is_Char(address)
+			? STACK.get_Char(address) // return a CharRustValue
+			: STACK.is_Unit(address)
+			? new UnitRustValue()
+			: undefined
+
+	} else {
+
+		value = is_String(address) 
+			? new StringRustValue(heap_get_string(address)) 
+			// : is_Closure(address)
+			// ? "<closure>"
+			// : is_Builtin(address)
+			// ? "<builtin>"
+			: undefined
+
+	}
+
+	if (value === undefined) {
+		throw new Error("Unknown tag");
+	}
+
+	return value;
+}
 	
-// function is_boolean(x: any): boolean {
-//     return typeof(x) === "boolean"
-// }
+const Rust_value_to_address = (x: RustValue): number => {
 
-// function is_undefined(x: any): boolean {
-//     return typeof(x) === "undefined"
-// }
+	if (x instanceof BooleanRustValue) {
+		return x.val ? True : False;
+	}
 
-// function is_number(x: any): boolean {
-//     return typeof(x) === "number"
-// }
+	if (x instanceof I32RustValue) {
+		return STACK.allocate_I32(x);
+	}
 
-// function is_null(x: any): boolean {
-//     return x === null
-// }
+	if (x instanceof F64RustValue) {
+		return STACK.allocate_F64(x);
+	}
 
-// function is_string(x: any):boolean {
-//     return typeof(x) === "string"
-// }
+	if (x instanceof CharRustValue) {
+		return STACK.allocate_Char(x);
+	}
 
+	if (x instanceof UnitRustValue) {
+		return Unit;
+	}
+
+	if (x instanceof StringRustValue) {
+		return heap_allocate_String(x);
+	}
+
+	throw new Error("unknown value")
+}
 
 /* **********************
  * operators and builtins
@@ -707,37 +708,117 @@ const JS_value_to_address = (x) =>
 
 // Supported binops: [&&, ||, &, |, -, %, +, /, *, ^, ===, >=, >, <=, <, !==]
 const binop_microcode = {
-    "&&": (x, y) => x && y,
-    "||": (x, y) => x || y,
-    "&": (x, y) => x & y,
-    "|": (x, y) => x | y,
-    "^": (x, y) => x ^ y,
-    "+": (x, y) => x + y,
-    "*": (x, y) => x * y,
-    "-": (x, y) => x - y,
-    "/": (x, y) => x / y,
-    "%": (x, y) => x % y,
-    "<": (x, y) => x < y,
-    "<=": (x, y) => x <= y,
-    ">=": (x, y) => x >= y,
-    ">": (x, y) => x > y,
-    "===": (x, y) => x === y,
-    "!==": (x, y) => x !== y, 
+    // Logical operations (return BooleanRustValue)
+    "&&": (x: BooleanRustValue, y: BooleanRustValue) => new BooleanRustValue(x.val && y.val),
+    "||": (x: BooleanRustValue, y: BooleanRustValue) => new BooleanRustValue(x.val || y.val),
+    
+    // Bitwise operations (return I32RustValue)
+    "&": (x: I32RustValue, y: I32RustValue) => new I32RustValue(x.val & y.val),
+    "|": (x: I32RustValue, y: I32RustValue) => new I32RustValue(x.val | y.val),
+    "^": (x: I32RustValue, y: I32RustValue) => new I32RustValue(x.val ^ y.val),
+    
+    // Arithmetic operations (return I32RustValue or F64RustValue)
+    "+": (x: RustValue<number>, y: RustValue<number>) => {
+        if (x instanceof I32RustValue && y instanceof I32RustValue) {
+            return new I32RustValue(x.val + y.val);
+        }
+        return new F64RustValue(x.val + y.val);
+    },
+    "*": (x: RustValue<number>, y: RustValue<number>) => {
+        if (x instanceof I32RustValue && y instanceof I32RustValue) {
+            return new I32RustValue(x.val * y.val);
+        }
+        return new F64RustValue(x.val * y.val);
+    },
+    "-": (x: RustValue<number>, y: RustValue<number>) => {
+        if (x instanceof I32RustValue && y instanceof I32RustValue) {
+            return new I32RustValue(x.val - y.val);
+        }
+        return new F64RustValue(x.val - y.val);
+    },
+    "/": (x: RustValue<number>, y: RustValue<number>) => new F64RustValue(x.val / y.val),
+    "%": (x: I32RustValue, y: I32RustValue) => new I32RustValue(x.val % y.val),
+    
+    // Comparison operations (return BooleanRustValue)
+    "<": (x: RustValue<number>, y: RustValue<number>) => new BooleanRustValue(x.val < y.val),
+    "<=": (x: RustValue<number>, y: RustValue<number>) => new BooleanRustValue(x.val <= y.val),
+    ">=": (x: RustValue<number>, y: RustValue<number>) => new BooleanRustValue(x.val >= y.val),
+    ">": (x: RustValue<number>, y: RustValue<number>) => new BooleanRustValue(x.val > y.val),
+    "===": (x: RustValue<any>, y: RustValue<any>) => new BooleanRustValue(x.val === y.val),
+    "!==": (x: RustValue<any>, y: RustValue<any>) => new BooleanRustValue(x.val !== y.val), 
 };
 
 // v2 is popped before v1
-const apply_binop = (op, v2, v1) =>
-	JS_value_to_address(
-		binop_microcode[op](address_to_JS_value(v1), address_to_JS_value(v2)),
+const apply_binop = (op, v2, v1) => 
+	Rust_value_to_address(
+		binop_microcode[op](address_to_Rust_value(v1), address_to_Rust_value(v2)),
 	);
 
 const unop_microcode = {
-	"-unary": (x) => -x,
-	"!": (x) => !x,
+	// Numeric negation (preserves type: i32 -> i32, f64 -> f64)
+	"-unary": (x: RustValue<number>) => {
+		if (x instanceof I32RustValue) {
+			return new I32RustValue(-x.val);
+		} else if (x instanceof F64RustValue) {
+			return new F64RustValue(-x.val);
+		}
+		throw new Error("Unary '-' requires a numeric operand"); // should be handled by typechecker; just sanity check
+	},
+
+	// Logical NOT (works on booleans)
+	"!": (x: BooleanRustValue) => {
+		if (x instanceof BooleanRustValue) {
+			return new BooleanRustValue(!x.val);
+		}
+		throw new Error("Unary '!' requires a boolean operand");
+	}
 };
 
-const apply_unop = (op, v) =>
-	JS_value_to_address(unop_microcode[op](address_to_JS_value(v)));
+const apply_unop = (op: string, v: number): number => {
+	const rustVal: RustValue = address_to_Rust_value(v);
+	const result: RustValue = unop_microcode[op](rustVal);
+	return Rust_value_to_address(result);
+};
+
+// in this machine, the builtins take their
+// arguments directly from the operand stack,
+// to save the creation of an intermediate
+// argument array
+const builtin_object = {
+	// display: () => {
+	// 	const address = OS.pop();
+	// 	display(address_to_JS_value(address));
+	// 	return address;
+	// },
+	// get_time: () => JS_value_to_address(get_time()),
+	// error: () => error(address_to_JS_value(OS.pop())),
+	// is_number: () => (is_Number(OS.pop()) ? True : False),
+	// is_boolean: () => (is_Boolean(OS.pop()) ? True : False),
+	// is_undefined: () => (is_Undefined(OS.pop()) ? True : False),
+	// is_string: () => (is_String(OS.pop()) ? True : False), // ADDED CHANGE
+	// is_function: () => is_Closure(OS.pop()),
+	// math_sqrt: () =>
+	// 	JS_value_to_address(math_sqrt(address_to_JS_value(OS.pop()))),
+	// pair: () => {
+	// 	const tl = OS.pop();
+	// 	const hd = OS.pop();
+	// 	return heap_allocate_Pair(hd, tl);
+	// },
+	// is_pair: () => (is_Pair(OS.pop()) ? True : False),
+	// head: () => heap_get_child(OS.pop(), 0),
+	// tail: () => heap_get_child(OS.pop(), 1),
+	// is_null: () => (is_Null(OS.pop()) ? True : False),
+	// set_head: () => {
+	// 	const val = OS.pop();
+	// 	const p = OS.pop();
+	// 	heap_set_child(p, 0, val);
+	// },
+	// set_tail: () => {
+	// 	const val = OS.pop();
+	// 	const p = OS.pop();
+	// 	heap_set_child(p, 1, val);
+	// },
+};
 
 const apply_builtin = (builtin_id) => {
 	const result = builtin_array[builtin_id]();
@@ -747,20 +828,21 @@ const apply_builtin = (builtin_id) => {
 
 // creating global runtime environment
 const primitive_values = Object.values(primitive_object);
+
 const frame_address = heap_allocate_Frame(primitive_values.length);
-for (let i = 0; i < primitive_values.length; i++) {
-	const primitive_value = primitive_values[i];
-	if (
-		typeof primitive_value === "object" &&
-		primitive_value.hasOwnProperty("id")
-	) {
-		heap_set_child(frame_address, i, heap_allocate_Builtin(primitive_value.id));
-	} else if (typeof primitive_value === "undefined") {
-		heap_set_child(frame_address, i, Undefined);
-	} else {
-		heap_set_child(frame_address, i, heap_allocate_Number(primitive_value));
-	}
-}
+// for (let i = 0; i < primitive_values.length; i++) {
+// 	const primitive_value = primitive_values[i];
+
+// 	if (typeof primitive_value === "object" && primitive_value.hasOwnProperty("id")) {
+// 		heap_set_child(frame_address, i, heap_allocate_Builtin(primitive_value.id));
+
+// 	} else if (typeof primitive_value === "undefined") {
+// 		heap_set_child(frame_address, i, Unit);
+
+// 	} else {
+// 		heap_set_child(frame_address, i, heap_allocate_Number(primitive_value));
+// 	}
+// }
 
 const global_environment = heap_Environment_extend(
 	frame_address,
@@ -782,25 +864,27 @@ HEAP; 		// declared above
 STACK; 		// declared above
 
 const microcode = {
-	LDC: (instr) => push(OS, JS_value_to_address(instr.val)),
+	LDC: (instr) => push(OS, Rust_value_to_address(instr.val)),
 	UNOP: (instr) => push(OS, apply_unop(instr.sym, OS.pop())),
 	BINOP: (instr) => push(OS, apply_binop(instr.sym, OS.pop(), OS.pop())),
 	POP: (instr) => OS.pop(),
-	JOF: (instr) => (PC = is_True(OS.pop()) ? PC : instr.addr),
+	JOF: (instr) => (PC = is_True(OS.pop()) ? PC : instr.addr), // TODO: check on stack
 	GOTO: (instr) => (PC = instr.addr),
 	ENTER_SCOPE: (instr) => {
-		push(RTS, heap_allocate_Blockframe(E));
+		push(RTS, heap_allocate_Blockframe(E)); // todo: store FP in the block frame
+
 		const frame_address = heap_allocate_Frame(instr.num);
 		E = heap_Environment_extend(frame_address, E);
+
 		for (let i = 0; i < instr.num; i++) {
-			heap_set_child(frame_address, i, Unassigned);
+			heap_set_child(frame_address, i, Unit); // all variable are unassigned initially
 		}
 	},
-	EXIT_SCOPE: (instr) => (E = heap_get_Blockframe_environment(RTS.pop())),
+	EXIT_SCOPE: (instr) => (E = heap_get_Blockframe_environment(RTS.pop())), // todo: restore SP to FP and free mem in the heap
 	LD: (instr) => {
-		const val = heap_get_Environment_value(E, instr.pos);
-		if (is_Unassigned(val)) error("access of unassigned variable");
-		push(OS, val);
+		const addr = heap_get_Environment_value(E, instr.pos); // this address is either a stack or heap addr
+		// if (is_Unit(val)) error("access of unassigned variable"); => should be checked on the type checker already!
+		push(OS, addr); 
 	},
 	ASSIGN: (instr) => heap_set_Environment_value(E, instr.pos, peek(OS, 0)),
 	LDF: (instr) => {
@@ -818,7 +902,7 @@ const microcode = {
 			heap_set_child(frame_address, i, OS.pop());
 		}
 		OS.pop(); // pop fun
-		push(RTS, heap_allocate_Callframe(E, PC));
+		push(RTS, heap_allocate_Callframe(E, PC)); // todo: store FP here
 		E = heap_Environment_extend(
 			frame_address,
 			heap_get_Closure_environment(fun),
@@ -871,28 +955,29 @@ function run(instrs) {
 	PC = 0;
 	E = global_environment;
 	RTS = [];
-	stringPool = {}; // ADDED CHANGE
-	//print_code()
+	stringPool = {}; 
+
+	// todo: clear stack and heap?? but clear what?? stack and heap should be initialized with global env and canonical values (true, false, unit)
+
 	while (!(instrs[PC].tag === "DONE")) {
 		//heap_display()
-		//display(PC, "PC: ")
-		//display(instrs[PC].tag, "instr: ")
 		//print_OS("\noperands:            ");
 		//print_RTS("\nRTS:            ");
+
 		const instr = instrs[PC++];
-		//display(instrs[PC].tag, "next instruction: ")
 		microcode[instr.tag](instr);
 	}
-	//display(OS, "\nfinal operands:           ")
 	//print_OS()
-	return address_to_JS_value(peek(OS, 0));
+
+	const value_in_Rust = address_to_Rust_value(peek(OS, 0));
+	return value_in_Rust.val;
 }
 
 export class RustVirtualMachine {
 	constructor() {}
 
-	execute(instructions: Object[]) {
-		run(instructions)
+	execute(instructions: Object[]): any {
+		return run(instructions)
 	}
 }
 

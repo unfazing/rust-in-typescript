@@ -231,7 +231,7 @@ import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
 import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment } from './CompileTimeEnvRust.js';
 import { error } from 'console';
-import { BooleanRustType, CharRustType, F64RustType, I32RustType, StringRustType, UnitRustType } from './Utils.js';
+import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
 
 export class RustCompiler {
     private visitor: RustEvaluatorVisitor;
@@ -300,24 +300,33 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): string {
         const val = ctx.CHAR_LITERAL()
-                    ? new CharRustType(ctx.getText())
+                    ? new CharRustValue(ctx.getText())
                     : ctx.INTEGER_LITERAL()
-                    ? new I32RustType(Number(ctx.getText()))
+                    ? new I32RustValue(Number(ctx.getText()))
                     : ctx.FLOAT_LITERAL()
-                    ? new F64RustType(Number(ctx.getText()))
+                    ? new F64RustValue(Number(ctx.getText()))
                     : ctx.STRING_LITERAL()
-                    ? new StringRustType(ctx.getText())
+                    ? new StringRustValue(ctx.getText())
                     : ctx.KW_FALSE()
-                    ? new BooleanRustType(false)
+                    ? new BooleanFalseRustValue()
                     : ctx.KW_TRUE()
-                    ? new BooleanRustType(true)
-                    : error("Literal has format of an unknown type.")
+                    ? new BooleanTrueRustValue()
+                    : error("Literal has format of an unknown type.");
         
-        instrs[wc++] = { tag: "LDC", val: val } 
+        const primitiveTypes = [CharRustValue, I32RustValue, F64RustValue, BooleanRustValue]
         
-        
-        
+        instrs[wc++] = { tag: "LDC", val: val } // whether constant is loaded on stack or heap depends on its RustValue
+
         log(`LOAD CONSTANT: ${ctx.getText()}`, "LITERAL_EXPRESSION")
+
+        // if (primitiveTypes.some(type => val instanceof type)) {
+        //     instrs[wc++] = { tag: "LDC_STACK", val: val }
+        //     log(`LOAD CONSTANT ON STACK: ${ctx.getText()}`, "LITERAL_EXPRESSION")
+        // } else {
+        //     instrs[wc++] = { tag: "LDC", val: val }
+        //     log(`LOAD CONSTANT ON HEAP: ${ctx.getText()}`, "LITERAL_EXPRESSION")
+        // }
+
         return ctx.getText();
     }
 
@@ -352,7 +361,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // ;
     visitBlockExpression (ctx: BlockExpressionContext): undefined {
         if (ctx.statements() == null) {
-            instrs[wc++] = { tag: "LDC", val: new UnitRustType() }
+            instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }
             return;
         }
         
@@ -586,7 +595,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 		instrs[wc++] = { tag: "GOTO", addr: loop_start };
         jump_on_false_instruction.addr = wc;
 
-		instrs[wc++] = { tag: "LDC", val: new UnitRustType() }; // while loops always have the unit type () in Rust!!
+		instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; // while loops always have the unit type () in Rust!!
     }
 
     // function_
@@ -625,7 +634,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.visit(body_ctx) // the environment will be extended and restored once more => done twice
         
         ce = compile_time_environment_restore(ce);
-        instrs[wc++] = { tag: "LDC", val: new UnitRustType() }
+        instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }
         instrs[wc++] = { tag: "RESET" }
         goto_instruction.addr = wc
         log(`<<< CLOSURE INSERT COMPLETE >>>`, "FUNCTION->CLOSURE")

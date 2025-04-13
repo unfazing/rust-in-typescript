@@ -9,42 +9,30 @@
 
 import { error } from "console"
 
-export class I32RustType {
-    val
-    constructor(val: number) {
-        this.val = val
-    }
+export class RustValue<T = any> {
+    constructor(public readonly val: T) {}
 }
 
-export class F64RustType {
-    val
-    constructor(val: number) {
-        this.val = val
-    }
+// Numeric types
+export class I32RustValue extends RustValue<number> {}
+export class F64RustValue extends RustValue<number> {}
+
+// Character/String types
+export class CharRustValue extends RustValue<string> {}
+export class StringRustValue extends RustValue<string> {}
+
+// Boolean types
+export class BooleanRustValue extends RustValue<boolean> {}
+export class BooleanTrueRustValue extends BooleanRustValue {
+    constructor() { super(true); }
+}
+export class BooleanFalseRustValue extends BooleanRustValue {
+    constructor() { super(false); }
 }
 
-export class CharRustType {
-    val
-    constructor(val: String) {
-        this.val = val
-    }
-}
-
-export class StringRustType {
-    val
-    constructor(val: String) {
-        this.val = val
-    }
-}
-
-export class BooleanRustType {
-    val
-    constructor(val: boolean) {
-        this.val = val
-    }
-}
-
-export class UnitRustType {
+// Unit type
+export class UnitRustValue extends RustValue<void> {
+    constructor() { super(undefined); }
 }
 
 export function print_error(msg: string) {
