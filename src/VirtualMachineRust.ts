@@ -1,7 +1,6 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
-import { start } from "repl";
 
 // (2) no loops and arrays
 
@@ -25,6 +24,41 @@ const peek = (array, address) => array.slice(-1 - address)[0];
 
 
 /* *************************
+ * Tags
+ * *************************/
+
+// All values are allocated in the memory as nodes. The first
+// word of the node is a header, and the first byte of the
+// header is a tag that identifies the type of node
+//
+// Primitives are stored on the stack, the rest on the heap.
+
+const False_tag 		= 0;
+const True_tag			= 1;
+const I32_tag 			= 2;
+const F64_tag 			= 3;
+const Unit_tag 			= 4; // equivalent to undefined
+const Char_tag			= 5;
+const Blockframe_tag	= 6;
+const Callframe_tag 	= 7;
+const Closure_tag 		= 8;
+const Frame_tag 		= 9;
+const Environment_tag 	= 10;
+const Pair_tag 			= 11;
+const Builtin_tag 		= 12;
+const String_tag 		= 13; 
+const Reference_tag 	= 14;
+
+
+/* *************************
+ * Memory Configs
+ * *************************/
+
+const word_size = 8;
+const mega = 2 ** 20;
+
+
+/* *************************
  * Stack
  * *************************/
 
@@ -36,7 +70,8 @@ class Stack {
 	private end_addr: number; 		// upper bound
 	private size_offset: number; 	// number of offset bytes in the first word
 
-	private SP: number; 			// Stack Pointer register maintained by Stack class
+	private SP: number; 			// Stack Pointer: points to the top of the stack
+	private FP: number;				// Frame Pointer: points to the start of the current frame
 
 	constructor(bytes: number, starting_address: number) {
 		if (bytes % word_size !== 0) 
@@ -53,13 +88,28 @@ class Stack {
 		this.end_addr = starting_address + (bytes / word_size)
 		this.size_offset = 5; 
 
+		this.FP = starting_address;
 		this.SP = starting_address;
 	}
 
-	// Must save FP (Frame Pointer) on the CallFrame AND blockFrame (in the RTS) to pop the stack.
-	// "clean" mem by moving SP to FP
-	pop(FP: number) {
-		this.SP = FP; 
+	pop_Blockframe() {
+		// sanity check
+		if (!this.is_Blockframe()) {
+			throw new Error("FP is not pointed to a block frame.")
+		}
+
+		this.SP = this.FP;
+		this.FP = this.get_Blockframe_FP();
+	}
+
+	pop_Callframe() {
+		// sanity check
+		if (!this.is_Callframe()) {
+			throw new Error("FP is not pointed to a call frame.")
+		}
+
+		this.SP = this.FP;
+		this.FP = this.get_Callframe_FP();
 	}
 
 	is_out_of_range(address: number): boolean {
@@ -94,7 +144,7 @@ class Stack {
 	};
 
 	// Remember to convert to virtual address first before any raw byte operation on the ByteArray.
-	// e.g. this.stack.get/set()...
+	// e.g. this.stack.get/setFloat64()...
 
 	// get a word in the stack at given address.
 	get(address: number) {
@@ -233,6 +283,67 @@ class Stack {
 	}
 
 	// TODO: allocate reference
+
+	// call frame
+	// [1 byte tag, 1 byte unused, 2 bytes pc,
+	//  1 byte unused, 2 bytes #children, 1 byte unused]
+	// followed by the address of env
+	allocate_Callframe(env_address: number, pc: number): number {
+		const address = this.allocate(Callframe_tag, 3);
+
+		this.set_2_bytes_at_offset(address, 2, pc);
+		this.set(address + 1, env_address);
+		this.set(address + 2, this.FP) // saved FP to restore later
+
+		// FP points to the start of this call frame
+		this.FP = address; 
+
+		return address;
+	}
+
+	get_Callframe_PC(): number {
+		return this.get_2_bytes_at_offset(this.FP, 2);
+	}
+
+	get_Callframe_environment(): number {
+		return this.get_child(this.FP, 0)
+	}
+
+	get_Callframe_FP(): number {
+		return this.get_child(this.FP, 1)
+	}
+
+	is_Callframe(): boolean {
+		return this.get_tag(this.FP) === Callframe_tag;
+	}
+
+	// block frame
+	// [1 byte tag, 4 bytes unused,
+	//  2 bytes #children, 1 byte unused]
+	// followed by the address of env
+	allocate_Blockframe(env_addr: number) {
+		const address = this.allocate(Blockframe_tag, 2);
+		this.set(address + 1, env_addr);
+		this.set(address + 2, this.FP); // saved FP to restore later
+
+		// FP points to the start of this block frame
+		this.FP = address; 
+
+		return address;
+	};
+
+	get_Blockframe_environment(): number {
+		return this.get_child(this.FP, 0);
+	}
+
+	get_Blockframe_FP(): number {
+		return this.get_child(this.FP, 1);
+	}
+
+	is_Blockframe(): boolean {
+		return this.get_tag(this.FP) === Blockframe_tag;
+	}
+
 }
 
 const stack_size = 1000000; 			// 125000 word addresses
@@ -244,9 +355,6 @@ const STACK = new Stack(stack_size, stack_starting_addr)
  * *************************/
 
 // HEAP is an array of bytes (JS ArrayBuffer)
-
-const word_size = 8;
-const mega = 2 ** 20;
 
 // heap_make allocates a heap of given size
 // (in megabytes)and returns a DataView of that,
@@ -264,17 +372,6 @@ const HEAP = heap_make(1000000);
 // free is the next free index in HEAP
 // we keep allocating as if there was no tomorrow
 let free = 0;
-
-// for debugging: display all bits of the heap
-// const heap_display = () => {
-// 	display("", "heap:");
-// 	for (let i = 0; i < free; i++) {
-// 		display(
-// 			word_to_string(heap_get(i)),
-// 			stringify(i) + " " + stringify(heap_get(i)) + " ",
-// 		);
-// 	}
-// };
 
 // heap_allocate allocates a given number of words
 // on the heap and marks the first word with a 1-byte tag.
@@ -340,48 +437,22 @@ const heap_set_4_bytes_at_offset = (address, offset, value) =>
 const heap_get_4_bytes_at_offset = (address, offset) =>
 	HEAP.getUint32(address * word_size + offset);
 
-// for debugging: return a string that shows the bits
-// of a given word
-const word_to_string = (word) => {
-	const buf = new ArrayBuffer(8);
-	const view = new DataView(buf);
-	view.setFloat64(0, word);
-	let binStr = "";
-	for (let i = 0; i < 8; i++) {
-		binStr += ("00000000" + view.getUint8(i).toString(2)).slice(-8) + " ";
-	}
-	return binStr;
-};
-
-// Values:
-//
-// All values are allocated in the memory as nodes. The first
-// word of the node is a header, and the first byte of the
-// header is a tag that identifies the type of node
-//
-// Primitives are stored on the stack, the rest on the heap.
-
-const False_tag 		= 0;
-const True_tag 			= 1;
-const I32_tag 			= 2;
-const F64_tag 			= 3;
-const Unit_tag 			= 4; // equivalent to undefined
-const Char_tag 			= 5;
-const Blockframe_tag 	= 6;
-const Callframe_tag 	= 7;
-const Closure_tag 		= 8;
-const Frame_tag 		= 9;
-const Environment_tag 	= 10;
-const Pair_tag 			= 11;
-const Builtin_tag 		= 12;
-const String_tag 		= 13; 
-const Reference_tag 	= 14;
-
+// // for debugging: return a string that shows the bits
+// // of a given word
+// const word_to_string = (word) => {
+// 	const buf = new ArrayBuffer(8);
+// 	const view = new DataView(buf);
+// 	view.setFloat64(0, word);
+// 	let binStr = "";
+// 	for (let i = 0; i < 8; i++) {
+// 		binStr += ("00000000" + view.getUint8(i).toString(2)).slice(-8) + " ";
+// 	}
+// 	return binStr;
+// };
 
 // Record<string, tuple(number, string)< where the key is the hash of the string
 // and the value is a tuple of the address of the string and the string itself
 let stringPool = {}; // ADDED CHANGE
-
 
 // We allocate canonical values for
 // true, false, unit (undefined)
@@ -495,39 +566,6 @@ const heap_get_Closure_environment = (address) => heap_get_child(address, 0);
 
 const is_Closure = (address) => heap_get_tag(address) === Closure_tag;
 
-// block frame
-// [1 byte tag, 4 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the address of env
-const heap_allocate_Blockframe = (env) => {
-	const address = heap_allocate(Blockframe_tag, 2);
-	heap_set(address + 1, env);
-	return address;
-};
-
-const heap_get_Blockframe_environment = (address) => heap_get_child(address, 0);
-
-const is_Blockframe = (address) => heap_get_tag(address) === Blockframe_tag;
-
-// call frame
-// [1 byte tag, 1 byte unused, 2 bytes pc,
-//  1 byte unused, 2 bytes #children, 1 byte unused]
-// followed by the address of env
-
-const heap_allocate_Callframe = (env, pc) => {
-	const address = heap_allocate(Callframe_tag, 2);
-	heap_set_2_bytes_at_offset(address, 2, pc);
-	heap_set(address + 1, env);
-	return address;
-};
-
-const heap_get_Callframe_environment = (address) => heap_get_child(address, 0);
-
-const heap_get_Callframe_pc = (address) =>
-	heap_get_2_bytes_at_offset(address, 2);
-
-const is_Callframe = (address) => heap_get_tag(address) === Callframe_tag;
-
 // environment frame
 // [1 byte tag, 4 bytes unused,
 //  2 bytes #children, 1 byte unused]
@@ -568,7 +606,6 @@ const heap_get_Environment_value = (env_address, position) => {
 };
 
 const heap_set_Environment_value = (env_address, position, value) => {
-	//display(env_address, "env_address:")
 	const [frame_index, value_index] = position;
 	const frame_address = heap_get_child(env_address, frame_index);
 	heap_set_child(frame_address, value_index, value);
@@ -592,17 +629,17 @@ const heap_Environment_extend = (frame_address, env_address) => {
 	return new_env_address;
 };
 
-// for debuggging: display environment
-// const heap_Environment_display = (env_address) => {
-// 	const size = heap_get_number_of_children(env_address);
-// 	display("", "Environment:");
-// 	display(size, "environment size:");
-// 	for (let i = 0; i < size; i++) {
-// 		display(i, "frame index:");
-// 		const frame = heap_get_child(env_address, i);
-// 		heap_Frame_display(frame);
-// 	}
-// };
+// // for debuggging: display environment
+// // const heap_Environment_display = (env_address) => {
+// // 	const size = heap_get_number_of_children(env_address);
+// // 	display("", "Environment:");
+// // 	display(size, "environment size:");
+// // 	for (let i = 0; i < size; i++) {
+// // 		display(i, "frame index:");
+// // 		const frame = heap_get_child(env_address, i);
+// // 		heap_Frame_display(frame);
+// // 	}
+// // };
 
 // number (I32 / F64)
 // [1 byte tag, 4 bytes unused,
@@ -857,7 +894,7 @@ const global_environment = heap_Environment_extend(
 let OS; 	// JS array (stack) of words (Addresses, word-encoded literals, numbers)
 let PC; 	// JS number
 let E; 		// heap Address
-let RTS; 	// JS array (stack) of Addresses
+// let RTS; 	// JS array (stack) of Addresses
 
 // Memory
 HEAP; 		// declared above
@@ -871,7 +908,7 @@ const microcode = {
 	JOF: (instr) => (PC = is_True(OS.pop()) ? PC : instr.addr), // TODO: check on stack
 	GOTO: (instr) => (PC = instr.addr),
 	ENTER_SCOPE: (instr) => {
-		push(RTS, heap_allocate_Blockframe(E)); // todo: store FP in the block frame
+		STACK.allocate_Blockframe(E);
 
 		const frame_address = heap_allocate_Frame(instr.num);
 		E = heap_Environment_extend(frame_address, E);
@@ -880,7 +917,21 @@ const microcode = {
 			heap_set_child(frame_address, i, Unit); // all variable are unassigned initially
 		}
 	},
-	EXIT_SCOPE: (instr) => (E = heap_get_Blockframe_environment(RTS.pop())), // todo: restore SP to FP and free mem in the heap
+	EXIT_SCOPE: (instr) => {
+
+		if (!STACK.is_Blockframe()) { // sanity check
+			throw new Error("Current stack frame is not a block frame when EXIT_SCOPE instruction is executed.")
+		}
+
+		// TODO: free mem in the heap (environmnent node + latest env frame)
+
+		// restore the environment
+		E = STACK.get_Blockframe_environment();
+
+		// pop the current block frame and the nodes allocated in this scope
+		STACK.pop_Blockframe();
+
+	},
 	LD: (instr) => {
 		const addr = heap_get_Environment_value(E, instr.pos); // this address is either a stack or heap addr
 		// if (is_Unit(val)) error("access of unassigned variable"); => should be checked on the type checker already!
@@ -902,7 +953,9 @@ const microcode = {
 			heap_set_child(frame_address, i, OS.pop());
 		}
 		OS.pop(); // pop fun
-		push(RTS, heap_allocate_Callframe(E, PC)); // todo: store FP here
+
+		STACK.allocate(E, PC);
+
 		E = heap_Environment_extend(
 			frame_address,
 			heap_get_Closure_environment(fun),
@@ -920,7 +973,9 @@ const microcode = {
 			heap_set_child(frame_address, i, OS.pop());
 		}
 		OS.pop(); // pop fun
+
 		// don't push on RTS here
+
 		E = heap_Environment_extend(
 			frame_address,
 			heap_get_Closure_environment(fun),
@@ -939,14 +994,23 @@ const microcode = {
 		push(OS, underlying_value);
 	},
 	RESET: (instr) => {
-		PC--;
-		// keep popping...
-		const top_frame = RTS.pop();
-		if (is_Callframe(top_frame)) {
-			// ...until top frame is a call frame
-			PC = heap_get_Callframe_pc(top_frame);
-			E = heap_get_Callframe_environment(top_frame);
+		// TODO: free current env node + lastest env frame
+// 
+		while (STACK.is_Blockframe()) {
+			// TODO: free environment node + latest env frame of this block frame
+
+			// Restore FP. No need to restore E.
+			STACK.pop_Blockframe();
 		}
+
+		
+		// Current stack frame must be the first call frame
+		// TODO: free heap + environment
+
+		// restore PC, E and FP
+		PC = STACK.get_Callframe_PC()
+		E = STACK.get_Callframe_environment();
+		STACK.pop_Callframe() 
 	},
 };
 
@@ -954,7 +1018,6 @@ function run(instrs) {
 	OS = [];
 	PC = 0;
 	E = global_environment;
-	RTS = [];
 	stringPool = {}; 
 
 	// todo: clear stack and heap?? but clear what?? stack and heap should be initialized with global env and canonical values (true, false, unit)
