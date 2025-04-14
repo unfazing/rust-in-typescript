@@ -25,34 +25,6 @@ const peek = (array, address) => array.slice(-1 - address)[0];
  * compile-time environment
  * ************************/
 
-// a compile-time environment is an array of
-// compile-time frames, and a compile-time frame
-// is an array of symbols
-
-// find the position [frame-index, value-index]
-// of a given symbol x
-export const compile_time_environment_position = (env, x) => {
-	let frame_index = env.length;
-	while (value_index(env[--frame_index], x) === -1) {}
-	return [frame_index, value_index(env[frame_index], x)];
-};
-
-const value_index = (frame, x) => {
-	for (let i = 0; i < frame.length; i++) {
-		if (frame[i] === x) return i;
-	}
-	return -1;
-};
-
-export const symbol_exist_in_compile_time_env = (env: string[][], symbol: string) => {
-	for (let i = env.length - 1; i >= 0; i--) {
-		if (value_index(env[i], symbol) !== -1) {
-			return true;
-		}
-	}
-
-	return false;
-}
 
 // in this machine, the builtins take their
 // arguments directly from the operand stack,
@@ -98,20 +70,9 @@ const builtin_object = {
 
 export const primitive_object = {};
 export const builtin_array = [];
-// {
-// 	let i = 0;
-// 	for (const key in builtin_object) {
-// 		primitive_object[key] = {
-// 			tag: "BUILTIN",
-// 			id: i,
-// 			arity: arity(builtin_object[key]),
-// 		};
-// 		builtin_array[i++] = builtin_object[key];
-// 	}
 // }
 
 const constants = {
-	None: null,
 	// math_E: math_E,
 	// math_LN10: math_LN10,
 	// math_LN2: math_LN2,
@@ -124,18 +85,70 @@ const constants = {
 
 for (const key in constants) primitive_object[key] = constants[key];
 
-export const compile_time_environment_extend = (vs, e) => {
-	//  make shallow copy of e
-	// return push([...e], vs);
-	e.push(vs);
-	return e;
-};
+export class CompileTimeEnvironment {
+	frames: CompileTimeEnvFrame[]
+	constructor() {
+		this.frames = [new CompileTimeEnvFrame([])]
+	}
 
-export const compile_time_environment_restore = (e) => {
-	e.pop();
-	return e;
+	compile_time_environment_extend(frame: CompileTimeEnvFrame) {
+		this.frames.push(frame)
+	}
+
+	compile_time_environment_restore() {
+		this.frames.pop()
+	}
+
+	compile_time_environment_position(symbol: string): [number, number] {
+		let frame_index: number = this.frames.length - 1;
+		while (this.frames[frame_index].lookup_idx(symbol) === -1) {
+			if (--frame_index < 0) {
+				throw new Error(`Compiler Error: [compile_time_environment_position] Could not find symbol ${symbol}`)
+			}
+		}
+		return [frame_index, this.frames[frame_index].lookup_idx(symbol)];
+	}
+
+	symbol_exist_in_compile_time_env(symbol: string) {
+		for (let i = this.frames.length - 1; i >= 0; i--) {
+			if (this.frames[i].lookup_idx(symbol) !== -1) {
+				return true;
+			}
+		}
+	}
 }
 
+
+export class CompileTimeEnvFrame {
+	frame: Symbol[]
+	constructor(symbols: Symbol[]) {
+		this.frame = []
+		for (const s of symbols) {
+			this.frame.push(s)
+		}
+	}
+
+	lookup_idx(symbol: string): number {
+		for (let i = 0; i < this.frame.length; i++) {
+			if (this.frame[i] === symbol) return i;
+		}
+		return -1;
+	}
+
+	get_symbol(s: string): Symbol {
+		const idx: number = this.lookup_idx(s)
+		if (idx === -1) {
+			throw new Error(`[CompileTimeEnvFrame::get_symbol] Symbol ${s} not found in frame!`)
+		}
+		return this.frame[idx]
+	}
+}
+
+export type Symbol = string
+
+
 // compile-time frames only need symbols (keys), no values
-const global_compile_frame = Object.keys(primitive_object);
-export const global_compile_environment = [global_compile_frame];
+// const global_compile_frame = Object.keys(primitive_object);
+// export const global_compile_environment = [global_compile_frame];
+
+export const global_compile_environment: CompileTimeEnvironment = new CompileTimeEnvironment();

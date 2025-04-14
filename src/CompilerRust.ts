@@ -229,7 +229,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { compile_time_environment_extend, compile_time_environment_position, compile_time_environment_restore, global_compile_environment, symbol_exist_in_compile_time_env } from './CompileTimeEnvRust.js';
+import { CompileTimeEnvFrame, CompileTimeEnvironment, global_compile_environment, Symbol } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
 
@@ -249,7 +249,7 @@ export class RustCompiler {
 let wc = 0;
 // instrs: instruction array
 let instrs = [];
-let ce = global_compile_environment;
+let ce: CompileTimeEnvironment = global_compile_environment;
 
 const LOGGING_ENABLED = false; // Set to false to disable logging
 function log(message: any, enclosing_function: string): void {
@@ -263,7 +263,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     visitCrate (ctx: CrateContext): object[] {
         // scan out local declarations in the global frame
         // in our Rust sublanguage, global frames only allow function declarations and constant declarations.
-        let locals = [];
+        let locals: Symbol[] = [];
         ctx.item().forEach(item => {
             log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
             
@@ -275,19 +275,19 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
             
             if (visItem.function_()) {
-                const symbol = this.visit(visItem.function_().identifier());
+                const symbol: string = this.visit(visItem.function_().identifier());
                 log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
                 locals.push(symbol);
             }
             else if (visItem.constantItem()) {
-                const symbol = this.visit(visItem.constantItem().identifier());
+                const symbol: string = this.visit(visItem.constantItem().identifier());
                 log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
                 locals.push(symbol);
             }
         });
 
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }
-        ce = compile_time_environment_extend(locals, ce)
+        ce.compile_time_environment_extend(new CompileTimeEnvFrame(locals))
         log(`ENVIRONMENT: ${ce}`, "CRATE")
         
         ctx.item().forEach(item => {
@@ -300,11 +300,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         });
 
         // call main() function if it exists
-        if (symbol_exist_in_compile_time_env(ce, "main")) {
+        if (ce.symbol_exist_in_compile_time_env("main")) {
             instrs[wc++] = {
                 tag: "LD",
                 sym: "main",
-                pos: compile_time_environment_position(ce, "main")
+                pos: ce.compile_time_environment_position("main")
             }
 
             instrs[wc++] = { tag: "CALL", arity: 0 } // TODO: disallow main from taking in arguments
@@ -312,7 +312,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
         instrs[wc++] = { tag: "EXIT_SCOPE" } // TODO: exit scope should not deallocate addr on OS
         instrs[wc] = { tag: "DONE" }
-        ce = compile_time_environment_restore(ce)
+        ce.compile_time_environment_restore()
 
         return instrs; // return the instructions list directly
     }
@@ -356,7 +356,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         instrs[wc++] = {
             tag: "LD",
             sym: symbol,
-            pos: compile_time_environment_position(ce, symbol)
+            pos: ce.compile_time_environment_position(symbol)
         }
         log(`LOAD VARIABLE: ${symbol}`, "PATH_EXPRESSION")
         return symbol
@@ -400,7 +400,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
         
         // scan out local declarations - TODO: there cant be nested sequences right?
-        let locals = [];
+        let locals: Symbol[] = [];
         log(`<<< SCANNING OUT LOCAL DECLARATIONS >>>`, "BLOCK_EXPRESSION");
 
         const statements = ctx.statements().statement();
@@ -408,10 +408,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             const stmt = statement.getChild(0) // each statement can only have 1 child
             // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
             if (stmt instanceof LetStatementContext) {
-                let symbol = this.visit(stmt.patternNoTopAlt())
+                let symbol: string = this.visit(stmt.patternNoTopAlt())
                 symbol = symbol.startsWith("mut ") ? symbol.substring(4) : symbol;
                 log(`FOUND LET LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
-                locals.push(symbol);
+                locals.push(symbol)
             } else if (stmt instanceof ItemContext) {
                 if (stmt.visItem() != null) {
                     if (stmt.visItem().function_() != null) {
@@ -430,13 +430,13 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`<<< SCANNING COMPLETE >>>`, "BLOCK_EXPRESSION");
         
         instrs[wc++] = { tag: "ENTER_SCOPE", num: locals.length }; // TODO: dont create enter and exit scope ins during function call
-        ce = compile_time_environment_extend(locals, ce)
+        ce.compile_time_environment_extend(new CompileTimeEnvFrame(locals))
 
         log(`VISITING STATEMENTS`, "BLOCK_EXPRESSION");
         this.visit(ctx.statements());
 
 		instrs[wc++] = { tag: "EXIT_SCOPE" };
-        ce = compile_time_environment_restore(ce);
+        ce.compile_time_environment_restore();
     }
 
     //statements
@@ -471,18 +471,50 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
     }
 
+    getSymbolFromExpression(expr_ctx: ExpressionContext): string {
+            while (expr_ctx instanceof GroupedExpressionContext) {
+                expr_ctx = expr_ctx.expression()
+            }
+    
+            if (expr_ctx instanceof BorrowExpressionContext) {
+                expr_ctx = expr_ctx.expression()
+            }
+
+            if (expr_ctx instanceof DereferenceExpressionContext) {
+                expr_ctx = expr_ctx.expression()
+            }
+    
+            while (expr_ctx instanceof GroupedExpressionContext) {
+                expr_ctx = expr_ctx.expression()
+            }
+    
+            if (expr_ctx instanceof PathExpression_Context) {
+                return this.visit(expr_ctx.pathExpression().getChild(0))
+            }
+            throw new Error("Compiler Error in Assignment: COULD NOT FIND PATH EXPRESSION TO RETRIEVE SYMBOL")
+        }
+    
+
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
         
         // evaluate/compile RHS 
         // push the address on the OS
-        let expr = this.visit(ctx.expression(1)) 
+        let RHS: ExpressionContext = ctx.expression(1)
+        let expr = this.visit(RHS) 
 
-        // unwrapping parentheses in group expression
         let LHS: ExpressionContext = ctx.expression(0);
-        while (LHS instanceof GroupedExpressionContext) {
-            LHS = LHS.expression();
-        }
+        // while (LHS instanceof GroupedExpressionContext) {
+        //     LHS = LHS.expression()
+        // }
+        
+        // if (LHS instanceof DereferenceExpressionContext) {
+        //     LHS = LHS.expression()
+        //     this.visit(LHS) // add LHS derefed addr to OS
+        // } else {
+        //     instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; 
+        // }
+        let symbol = this.getSymbolFromExpression(LHS) // visit children of pathExpression to avoid adding LD instr
 
         // if (LHS instanceof DereferenceExpressionContext) {
         //     log(`ASSIGNING A DEREF: ${LHS.getText()}`, "ASSIGNMENT_EXPRESSION")
@@ -498,13 +530,12 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         //     return; // terminate early
         // }
         
-        let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
         log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
         
         log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
-            pos: compile_time_environment_position(ce, symbol),
+            pos: ce.compile_time_environment_position(symbol),
         };
 
         // assignment always have the unit type () in Rust!
@@ -695,7 +726,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         this.insertClosure(params, body)
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
-            pos: compile_time_environment_position(ce, symbol),
+            pos: ce.compile_time_environment_position(symbol),
         };
     }
 
@@ -705,17 +736,18 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
         const goto_instruction = { tag: "GOTO", addr: -1 }
         instrs[wc++] = goto_instruction
-        let param_list =  []
+        let param_list: Symbol[] =  []
         for (let i = 0; i < arity; i++) {
-            param_list.push(this.visit(params_ctx.functionParam(i).functionParamPattern().pattern()))
+            const symbol: string = this.visit(params_ctx.functionParam(i).functionParamPattern().pattern())
+            param_list.push(symbol)
         }
         log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
-        ce = compile_time_environment_extend(param_list, ce)
+        ce.compile_time_environment_extend(new CompileTimeEnvFrame(param_list))
 
         // compile body into instructions
         this.visit(body_ctx) // the environment will be extended and restored once more => done twice
         
-        ce = compile_time_environment_restore(ce);
+        ce.compile_time_environment_restore();
 
         // no need to insert unit type. The value of function call is on the top of the OS at the end
         // instrs[wc++] = { tag: "LDC", val: new UnitRustValue() } 
@@ -760,7 +792,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         
         instrs[wc++] = {
             tag: "ASSIGN", 
-            pos: compile_time_environment_position(ce, symbol),
+            pos: ce.compile_time_environment_position(symbol),
         };
         
         return symbol;
@@ -777,7 +809,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
-            pos: compile_time_environment_position(ce, symbol),
+            pos: ce.compile_time_environment_position(symbol),
         };
     }
 
