@@ -350,10 +350,8 @@ class Stack {
         return this.stack.getUint32(virtual_address * word_size + offset);
     }
 
-
 	compare_tag(address: number, expected_tag: number) {
 		const actual_tag = this.get_tag(address);
-
 		return actual_tag === expected_tag;
 	}
 
@@ -501,28 +499,28 @@ class Stack {
 		return HEAP.getString(heap_addr);
 	}
 
-	allocate_Closure(arity: number, pc: number, env: number): number {
-		const stack_address = this.allocate(Closure_tag, 2); // first word is tag, 2nd word is address to the heap string
-		const heap_address = HEAP.allocateClosure(arity, pc, env);
-		this.set(stack_address + 1, heap_address);
+	allocate_Closure(arity: number, pc: number, env): number {
+		// first word is tag with PC and arity
+		const stack_address = this.allocate(Closure_tag, 2); 
+
+		this.set_byte_at_offset(stack_address, 1, arity);
+		this.set_2_bytes_at_offset(stack_address, 2, pc);
+		this.set(stack_address + 1, env);
+
 		return stack_address;
 	}
 
 	get_Closure_arity(address: number): number {
-		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
-		return HEAP.getClosureArity(closure_heap_addr);
+		return this.get_byte_at_offset(address, 1);
 	}
 
 	get_Closure_PC(address: number): number {
-		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
-		return HEAP.getClosurePC(closure_heap_addr);
+		return this.get_2_bytes_at_offset(address, 2);
 	}
 
 	get_Closure_Env(address: number): number {
-		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
-		return HEAP.getClosureEnv(closure_heap_addr);
+		return this.get_child(address, 0);
 	}
-	
 
 	// call frame
 	// [1 byte tag, 1 byte unused, 2 bytes pc,
@@ -1155,7 +1153,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 		value = STACK.get_String(address);
 	}
 
-	if (STACK.is_Closure(address)) {
+	if (STACK.compare_tag(address, Closure_tag)) {
 		value = new RustValue("<closure>"); // we should not use the closure value at all
 	}
 
@@ -1447,15 +1445,18 @@ const microcode = {
 
 	// },
 	LDF: (instr) => {
-		const closure_address = HEAP.allocateClosure(instr.arity, instr.addr, E);
+		const closure_address = STACK.allocate_Closure(instr.arity, instr.addr, E);
 		push(OS, closure_address);
 	},
 	CALL: (instr) => {
-		const arity = instr.arity;
-		const fun = peek(OS, arity);
-		if (HEAP.isBuiltin(fun)) {
-			return apply_builtin(HEAP.getBuiltinId(fun));
+		const arity = instr.arity;heap_Environment_display
+		const fun = peek(OS, arity); // an address to a closure, either built-in or user-defined
+
+		if (STACK.compare_tag(fun, Builtin_tag)) {
+			return apply_builtin(HEAP.getBuiltinId(fun)); // TODO: change to Stack
 		}
+
+		// else, must a be a user defined function. Stored on the stack
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
 			HEAP.setChild(frame_address, i, OS.pop());
@@ -1466,16 +1467,18 @@ const microcode = {
 
 		E = HEAP.extendEnvironment(
 			frame_address,
-			HEAP.getClosureEnv(fun),
+			STACK.get_Closure_Env(fun), // no more env capture in function
 		);
-		PC = HEAP.getClosurePC(fun);
+
+		PC = STACK.get_Closure_PC(fun);
 	},
 	TAIL_CALL: (instr) => {
 		const arity = instr.arity;
 		const fun = peek(OS, arity);
-		if (HEAP.isBuiltin(fun)) {
-			return apply_builtin(HEAP.getBuiltinId(fun));
+		if (STACK.compare_tag(fun, Builtin_tag)) {
+			return apply_builtin(HEAP.getBuiltinId(fun)); // TODO: change to Stack
 		}
+
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
 			HEAP.setChild(frame_address, i, OS.pop());
@@ -1486,9 +1489,10 @@ const microcode = {
 
 		E = HEAP.extendEnvironment(
 			frame_address,
-			HEAP.getClosureEnv(fun),
+			STACK.get_Closure_Env(fun),
 		);
-		PC = HEAP.getClosurePC(fun);
+
+		PC = STACK.get_Closure_PC(fun);
 	},
 	REF: (instr) => {
 		const target_addr: number = OS.pop()
@@ -1525,6 +1529,41 @@ const microcode = {
 		E = STACK.get_Callframe_environment();
 		STACK.pop_Callframe() 
 	},
+};
+
+const heap_Environment_display = (env_address) => {
+	const size = HEAP.getNumberOfChildren(env_address);
+	console.log("Environment:");
+	console.log("environment size:" + size);
+	for (let i = 0; i < size; i++) {
+		console.log("frame index: " + i);
+		const frame = HEAP.getChild(env_address, i);
+		heap_Frame_display(frame);
+	}
+};
+
+
+const heap_Frame_display = (address) => {
+	console.log("Frame:\n");
+	const size = HEAP.getNumberOfChildren(address);
+	console.log("frame size:" + size);
+	for (let i = 0; i < size; i++) {
+		console.log("value address: " + i);
+		const value = HEAP.getChild(address, i);
+		console.log("value: " + value);
+		console.log("value word: " + word_to_string(value));
+	}
+};
+
+const word_to_string = (word) => {
+	const buf = new ArrayBuffer(8);
+	const view = new DataView(buf);
+	view.setFloat64(0, word);
+	let binStr = "";
+	for (let i = 0; i < 8; i++) {
+		binStr += ("00000000" + view.getUint8(i).toString(2)).slice(-8) + " ";
+	}
+	return binStr;
 };
 
 // TODO: init builtins and primitive constants properly
