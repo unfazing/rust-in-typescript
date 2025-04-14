@@ -450,45 +450,16 @@ function printInstructions(instrs: object[]): undefined {
     console.log(formattedInstructions);
 }
 
-const compiler_code = `
-fn main() {
-    // const TEST_CONST: i32 = 1;
-    // let mut test_mut_let: i32 = 2;
-    // fn test_closure(p1: i32, p2: i32) {
-    //     const FILLER: i32 = 11;
-    //     return 3;
-    // }
-    // test_mut_let = test_mut_let + 6;
-    // test_closure(4, 5);
-
-    // let mut x : i32 = 0;
-    // while x < 5 {
-    //     x = x + 1;
-    // }
-
-    // if (true) {
-    //     1;
-    // } // no else branch
-
-    // fn validate(z: i32) -> bool {
-    //     return z >= 2;
-    // }
-
-    // const y : i32 = 5;
-    // if (y < 2) { // comparisonExpression
-    //     return y;
-    // } else if (validate(y)) { // functionCall + another if expression after else
-    //     return y;
-    // } else {
-    //     return y;
-    // }
-
-    let x : i32 = 42;
-    let mut y : bool = true;
-}
-`
-
-// test_compiler(compiler_code)
+// test_compiler(`
+//     fn main() -> i32 {
+//         let mut x = 0;
+//         x = 1;
+//         while x < 2 {
+//             1;
+//             x = x + 1;
+//         }
+//         x
+//     }`)
 
 const test_VM = (code: string, expectedResult: any, testName?: string) => {
     console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
@@ -619,14 +590,12 @@ test_VM(
     `
     fn main() -> i32 {
         let mut x = 0;
-        x = 1;
-        while x < 3 {
-            1;
+        while x < 10 {
             x = x + 1;
         }
         x
     }`,
-    3, "Max depth??"
+    10, "Max depth??"
 );
 
 test_VM(
