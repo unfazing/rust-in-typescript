@@ -351,6 +351,12 @@ class Stack {
     }
 
 
+	compare_tag(address: number, expected_tag: number) {
+		const actual_tag = this.get_tag(address);
+
+		return actual_tag === expected_tag;
+	}
+
 	// allocation of primitive types
 
 	allocate_False(): number {
@@ -474,6 +480,49 @@ class Stack {
 	is_Reference(address: number): boolean {
 		return this.get_tag(address) === Reference_tag;
 	}
+
+	allocate_String(x: StringRustValue): number {
+		const stack_address = this.allocate(String_tag, 2); // first word is tag, 2nd word is address to the heap string
+
+		const heap_address = HEAP.allocateString(x);
+
+		this.set(stack_address + 1, heap_address);
+
+		return stack_address;
+	}
+
+	is_String(address: number): boolean {
+		return this.get_tag(address) === String_tag;
+	}
+
+	get_String(address: number): StringRustValue {
+		const heap_addr = this.get_child(address, 0); // child is 0-index
+
+		return HEAP.getString(heap_addr);
+	}
+
+	allocate_Closure(arity: number, pc: number, env: number): number {
+		const stack_address = this.allocate(Closure_tag, 2); // first word is tag, 2nd word is address to the heap string
+		const heap_address = HEAP.allocateClosure(arity, pc, env);
+		this.set(stack_address + 1, heap_address);
+		return stack_address;
+	}
+
+	get_Closure_arity(address: number): number {
+		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
+		return HEAP.getClosureArity(closure_heap_addr);
+	}
+
+	get_Closure_PC(address: number): number {
+		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
+		return HEAP.getClosurePC(closure_heap_addr);
+	}
+
+	get_Closure_Env(address: number): number {
+		const closure_heap_addr = this.get_child(address, 0); // child is 0-index
+		return HEAP.getClosureEnv(closure_heap_addr);
+	}
+	
 
 	// call frame
 	// [1 byte tag, 1 byte unused, 2 bytes pc,
@@ -1068,49 +1117,60 @@ class Heap {
 const is_stack_address = (address: number): boolean => !STACK.is_out_of_range(address)
 
 const address_to_Rust_value = (address: number): RustValue => {
-
 	let value: RustValue | undefined;
 
-	if (is_stack_address(address)) {
-
-		if (STACK.is_Unassigned(address)) {
-			throw new Error("Access of uninitialize variable.")
-		}
-
-		value = STACK.is_False(address)
-			? new BooleanFalseRustValue()
-			: STACK.is_True(address)
-			? new BooleanTrueRustValue()
-			: STACK.is_I32(address)
-			? STACK.get_I32(address)
-			: STACK.is_F64(address)
-			? STACK.get_F64(address)
-			: STACK.is_Char(address)
-			? STACK.get_Char(address) // return a CharRustValue
-			: STACK.is_Unit(address)
-			? new UnitRustValue()
-			: STACK.is_Reference(address)  
-			? new RustValue("reference") // TODO: create a proper wrapper for reference? For debugging purposes mostly
-			: undefined
-
-	} else {
-
-		value = HEAP.isString(address) 
-			? HEAP.getString(address)
-			: HEAP.isClosure(address)
-			? new RustValue("<closure>") // we should not use the closure value at all
-			// : is_Builtin(address)
-			// ? "<builtin>"
-			: undefined
-
+	if (STACK.is_Unassigned(address)) {
+		throw new Error("Access of uninitialize variable.");
 	}
+
+	if (STACK.is_False(address)) {
+		value = new BooleanFalseRustValue();
+	}
+
+	if (STACK.is_True(address)) {
+		value = new BooleanTrueRustValue();
+	}
+
+	if (STACK.is_I32(address)) {
+		value = STACK.get_I32(address);
+	}
+
+	if (STACK.is_F64(address)) {
+		value = STACK.get_F64(address);
+	}
+
+	if (STACK.is_Char(address)) {
+		value = STACK.get_Char(address); // return a CharRustValue
+	}
+
+	if (STACK.is_Unit(address)) {
+		value = new UnitRustValue();
+	}
+
+	if (STACK.is_Reference(address)) {
+		value = new RustValue("reference"); // TODO: create a proper wrapper for reference? For debugging purposes mostly
+	}
+
+	if (STACK.is_String(address)) {
+		value = STACK.get_String(address);
+	}
+
+	if (STACK.is_Closure(address)) {
+		value = new RustValue("<closure>"); // we should not use the closure value at all
+	}
+
+	// Uncomment and implement if needed:
+	// if (is_Builtin(address)) {
+	//     value = new RustValue("<builtin>");
+	// }
 
 	if (value === undefined) {
 		throw new Error("Unknown tag");
 	}
 
 	return value;
-}
+};
+
 	
 const Rust_value_to_address = (x: RustValue): number => {
 
