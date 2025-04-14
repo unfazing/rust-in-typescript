@@ -4,6 +4,5 @@
         "moduleResolution": "bundler",
         "target": "es2023",
         "sourceMap": true,
-        // "outDir": "./build",
     }
 }

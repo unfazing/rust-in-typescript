@@ -3,7 +3,7 @@ import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 
 export default {
-    plugins: [nodeResolve(), typescript()],
+    plugins: [nodeResolve(), typescript({ sourceMap: true })],
     input: "src/index.ts",
     output: {
         plugins: [terser()],
