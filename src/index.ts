@@ -437,7 +437,7 @@ test_typechecker(`
         let mut x_ref: &mut string = &mut x;
         x_ref = test(x_ref); // cannot assign to moved value
     }
-    `, "Type error in let statement; Cannot assign to a moved value.")
+    `, "Type error in assignment; Cannot assign to a moved value.")
 
 test_typechecker(`
     fn fail_move_ref_in_fn() {
@@ -517,7 +517,48 @@ test_typechecker(`
     }
     `, "Type error; dereferencing a non-reference type: i32")
         
-    
+test_typechecker(`
+    fn fail_dangling_ref() {
+        let mut x: &mut i32 = &mut 5;
+        {
+            let mut y: i32 = 2;
+            x = &mut y;
+        }
+        let mut z: i32 = *x;
+    }
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+
+test_typechecker(`
+    fn fail_dangling_ref_temp_var() {
+        let mut x: &mut i32 = &mut 5;
+        {
+            x = &mut 7;
+        }
+        let mut z: i32 = *x;
+    }
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+
+
+test_typechecker(`
+    fn fail_dangling_ref_temp_var_2() {
+        let mut x: &mut i32 = &mut 5;
+        {
+            let y: &i32 = &123;
+            x = &mut (7 + *y);
+        }
+        let mut z: i32 = *x;
+    }
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+
+
+test_typechecker(`
+    fn pass_no_dangling_ref_assignment() {
+        let mut x: &mut i32 = &mut 5;
+        let y: &i32 = &123;
+        x = &mut (7 + *y);
+        let mut z: i32 = *x;
+    }
+    `, "")
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);

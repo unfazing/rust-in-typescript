@@ -116,6 +116,25 @@ export class TypeEnvironment {
         type.IsTemporary = false;
     }
 
+    // zero-th scope is global type env
+    get_scope_depth(symbol: string): number { 
+        for (let i = this.type_environment.length - 1; i >= 0; i--) { 
+            // found symbol in current frame, terminate early
+            if (this.type_environment[i].frame.hasOwnProperty(symbol) ) {
+                return i + 1
+            }
+        }
+
+        // If not found, check the global type environment
+        if (this.global_type_frame.frame.hasOwnProperty(symbol)) {
+            return 0
+        }
+        print_or_throw_error(`Type error; [get_scope_depth] Unbound variable ${symbol}.`)
+    }
+
+    get_current_environment_depth(): number {
+        return this.type_environment.length
+    }
 }
 
 export abstract class TypeFrame {
