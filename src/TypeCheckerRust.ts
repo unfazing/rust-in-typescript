@@ -371,6 +371,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         te.restore_type_environment();
     }
 
+    // ImmutableRefTypes and ScalarTypes have copy trait and are not moved. 
+    // Closures have no owners
     canBeMoved(type: Type): boolean {
         return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
     }
@@ -405,7 +407,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const type: Type = te.lookup_type(symbol) 
 
         if (type === undefined) {
-            print_or_throw_error(`Cannot find symbol ${symbol} in this scope.`)
+            print_or_throw_error(`Type error in pathExpression; Cannot find symbol ${symbol} in this scope.`)
         }
 
         if (type.IsMoved) {
@@ -588,19 +590,21 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         
         log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
 
+        if (actual_type.IsMoved) {
+            print_or_throw_error(`Type error in let statement; Cannot assign to a moved value.`);
+        }
+
         if (!compare_type(expected_type, actual_type)) {
             print_or_throw_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
 
         // An assignment that moves ownership of a variable is happening.
-        // Function types cannot be moved.
         if (this.canBeMoved(actual_type)) {
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`);
             } else {
-                actual_type.IsMoved = true;
-                if (actual_type instanceof RefType) actual_type.freeRef()
-                log(`MARKING RHS AS MOVED`, "ASSIGNMENT_EXPRESSION");
+                actual_type.mark_moved()
+                log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
             }
 
         }
@@ -658,8 +662,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                         print_or_throw_error(`Type error in application; cannot move a borrowed value into function.`);
                     }
                     
-                    type.IsMoved = true;
-                    if (type instanceof RefType) type.freeRef()
+                    type.mark_moved();
                     log(`MARKING ARGUMENT AT POSITION ${i} AS MOVED`, "CALL_EXPRESSION");
                 }
             }
@@ -668,17 +671,18 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // We can simply return type as for a function with return type as reftype
         // invariant 1: it must take in at most a single reftype
         // invariant 2: it must return the same reftype object taking in as argument
-        if (expected_type instanceof RefType) {
-            // for (const type of actual_arg_types) {
-            //     // update borrow status of underlying ref type again
-            //     if (type instanceof ImmutableRefType) {
-            //         type.InnerType.ImmutableBorrowCount++
-            //         return type
-            //     } else if (type instanceof MutableRefType) {
-            //         type.MutableBorrowExists = true
-            //         return type
-            //     }
-            // }
+        if (expected_type.ReturnType instanceof RefType) {
+            for (const type of actual_arg_types) {
+                if (type instanceof RefType) {
+                    // update borrow status of mutable ref type that was initially moved/freed
+                    if (type instanceof MutableRefType) {
+                        type.InnerType.MutableBorrowExists = true
+                        log(`Updating inner type mutable borrow status`, "CALL_EXPRESSION")
+                        log(`Type: ${unparse_type(type)}`, "CALL_EXPRESSION")
+                    }
+                    return type
+                }
+            }
             print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`)
         } else {
             // clone the object return type so the ReturnType of the ClosureType 
@@ -977,8 +981,8 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             : [];
 
         const returnType: Type = ctx.bareFunctionReturnType() 
-            ? new UnitType() 
-            : this.visit(ctx.bareFunctionReturnType())
+            ? this.visit(ctx.bareFunctionReturnType())
+            : new UnitType() 
 
         const closure: ClosureType = new ClosureType(paramTypes, returnType);
 
@@ -1032,8 +1036,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitFunction_(ctx: Function_Context): Type {
         function findBorrowParam(expected_param_types: Type[]): Type {
             let borrow_param: Type
-            for (let i = 0; i < expected_param_types.length; i++) {
-                const type = expected_param_types[i]
+            for (const type of expected_param_types) {
                 if (!(type instanceof RefType)) {
                     continue
                 }
@@ -1200,6 +1203,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         
         log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
+        if (actual_type.IsMoved) {
+            print_or_throw_error(`Type error in let statement; Cannot assign to a moved value.`);
+        }
+
         if (!compare_type(expected_type, actual_type)) {
             print_or_throw_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
@@ -1211,8 +1218,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`);
             }
             
-            actual_type.IsMoved = true;
-            if (actual_type instanceof RefType) actual_type.freeRef()
+            actual_type.mark_moved()
             log(`Moved ownership into variable ${symbol}`, "LET_STATEMENT");
         }
 
