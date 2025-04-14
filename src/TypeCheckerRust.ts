@@ -544,6 +544,27 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return blockType;
     }
 
+    // Used when getting a symbol from a borrow expression or path expression
+    getSymbolFromExpression(expr_ctx: ExpressionContext): string {
+        while (expr_ctx instanceof GroupedExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        if (expr_ctx instanceof BorrowExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        while (expr_ctx instanceof GroupedExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        if (expr_ctx instanceof PathExpression_Context) {
+            log(`[getSymbolFromExpression] Found symbol in expression: ${expr_ctx.getText()}`, "getSymbolFromExpression")
+            return this.visit(expr_ctx.pathExpression().getChild(0))
+        }
+        print_or_throw_error(`[getSymbolFromExpression] The ExpressionContext provided (${expr_ctx.getText()}) does not have a PathExpressionContext on the path to leaf node.`)
+    }
+
     // expression EQ expression
     // Snippet that Rust allows but we don't:     
     // fn f()-> i32 { let z = return 7;} // encounter mismatch types in assignment
@@ -563,10 +584,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const expected_type: Type = this.visit(LHS); 
         const actual_type: Type = this.visit(RHS);
 
-        if (!expected_type.IsTemporary && !expected_type.IsMutable) {
+        // TODO: change the default to mutable: true
+        if (!actual_type.IsTemporary && !expected_type.IsMutable) {
             print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.')
         }
-        
+
+
         // if assigning to a deref, check if the ref is a mut&
         // e.g. *x = y;
         if (LHS instanceof DereferenceExpressionContext) {
@@ -591,12 +614,37 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
 
         if (actual_type.IsMoved) {
-            print_or_throw_error(`Type error in let statement; Cannot assign to a moved value.`);
+            print_or_throw_error(`Type error in assignment; Cannot assign to a moved value.`);
         }
 
         if (!compare_type(expected_type, actual_type)) {
             print_or_throw_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`);
         }
+
+        // checks to prevent dangling reference during ref assignment
+        // e.g. 
+        // let mut x: &mut i32 = &mut 1;
+        // {
+        //     let mut y: i32 = 2;
+        //     x = &mut y; // or x = &10;
+        // }
+        if (expected_type instanceof RefType) {
+            const lhs_symbol: string = this.getSymbolFromExpression(LHS)
+            let rhs_scope_depth: number;
+            let lhs_scope_depth: number = te.get_scope_depth(lhs_symbol);
+            if (actual_type.IsTemporary) {
+                rhs_scope_depth = te.get_current_environment_depth()
+            } else {
+                const rhs_symbol: string = this.getSymbolFromExpression(RHS)
+                rhs_scope_depth = te.get_scope_depth(rhs_symbol);
+            }
+
+            if (lhs_scope_depth < rhs_scope_depth) {
+                print_or_throw_error(`Type error in assignment; Lifetime of locally assigned reference shorter than variable ${lhs_symbol}.`)
+            }
+        }
+
+                    
 
         // An assignment that moves ownership of a variable is happening.
         if (this.canBeMoved(actual_type)) {
@@ -928,7 +976,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // leaf node: returns the type declared in the declaration statement
     visitType_(ctx: Type_Context): Type {
         if (!ctx.typeNoBounds()) {
-            print_or_throw_error("Unsupported type.");
+            print_or_throw_error("Type error; Unsupported type.");
         }
 
         return this.visitChildren(ctx);
