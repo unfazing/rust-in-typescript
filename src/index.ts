@@ -764,25 +764,25 @@ test_VM(
     1000,
 );
 
-// test_VM(`
-//     fn main() -> i32 {
-//         let x = 42;
-//         let p = &x;
-//         *p
-//     }`, 42, "i32: basic reference and dereference");
+test_VM(`
+    fn main() -> i32 {
+        let x = 42;
+        let p = &x;
+        *p
+    }`, 42, "i32: basic reference and dereference");
         
-//     test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 10;
-//         let p = &mut x;
-//         *p = 5;
-//         x
-//     }`, 5, "i32: mut reference write-through");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 10;
+        let p = &mut x;
+        // *p = 5;
+        x
+    }`, 5, "i32: mut reference write-through");
         
-//     test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 1;
-//         let p = &mut x;
-//         *p = *p + 1;
-//         x
-//     }`, 2, "i32: mutate through reference");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 1;
+        let p = &mut x;
+        *p = *p + 1;
+        x
+    }`, 2, "i32: mutate through reference");

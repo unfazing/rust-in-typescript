@@ -62,6 +62,7 @@ const Unassigned_tag = 15;
  * *************************/
 
 const word_size = 8;
+const node_size = 10;
 const size_offset = 5; // number of offset bytes in the first word (1 byte tag, 4 bytes payload)
 const mega = 2 ** 20;
 
@@ -168,7 +169,7 @@ class Stack {
             .replace(/(\d{8})(?=\d)/g, '$1 '); // Add space every 8 bits
     }
 
-    // Helper to convert tag numbers to names (you'll need to define your tag constants)
+    // Helper to convert tag numbers to names (need to define tag constants)
     private tag_to_string(tag: number): string {
         const tagMap = {
             [False_tag]: "False",
@@ -355,8 +356,13 @@ class Stack {
 		return actual_tag === expected_tag;
 	}
 
-	// allocation of primitive types
+	is_heap_allocated_type(address: number): boolean {
+		const HEAP_ALLOCATED_TAGS = [String_tag] // extend when more heap allocated types added
+		const actual_tag = this.get_tag(address);
+		return actual_tag in HEAP_ALLOCATED_TAGS;
+	}
 
+	// allocation of primitive types
 	allocate_False(): number {
 		return this.allocate(False_tag, 1); 
 	}
@@ -479,26 +485,23 @@ class Stack {
 		return this.get_tag(address) === Reference_tag;
 	}
 
-	allocate_String(x: StringRustValue): number {
-		const stack_address = this.allocate(String_tag, 2); // first word is tag, 2nd word is address to the heap string
-
-		const heap_address = HEAP.allocateString(x);
-
-		this.set(stack_address + 1, heap_address);
-
-		return stack_address;
+	// Builtins
+	// [1 byte tag, 1 byte id, 3 bytes unused,
+	//  2 bytes #children, 1 byte unused]
+	// Note: #children is 0
+	allocate_Builtin(id: number): number {
+		const addr = this.allocate(Builtin_tag, 1);
+		this.set_byte_at_offset(addr, 1, id);
+		return addr;
 	}
 
-	is_String(address: number): boolean {
-		return this.get_tag(address) === String_tag;
+	get_Builtin_Id(address: number): number {
+		return this.get_byte_at_offset(address, 1);
 	}
 
-	get_String(address: number): StringRustValue {
-		const heap_addr = this.get_child(address, 0); // child is 0-index
-
-		return HEAP.getString(heap_addr);
-	}
-
+	// [1 byte tag, 1 byte arity, 2 bytes pc, 1 byte unused,
+	//  2 bytes #children, 1 byte unused]
+	// followed by the address of env
 	allocate_Closure(arity: number, pc: number, env): number {
 		// first word is tag with PC and arity
 		const stack_address = this.allocate(Closure_tag, 2); 
@@ -621,6 +624,17 @@ class Stack {
 			throw new Error("FP is not pointed to a block frame.")
 		}
 
+		// iterate through variables on stack to update hasOwner of heap-allocated objects
+		let addr = this.FP
+		while (addr < this.SP) {
+			if (STACK.is_heap_allocated_type(addr)) {
+				const heap_addr = STACK.get_child(addr, 0)
+				HEAP.unsetHasOwner(heap_addr)
+			}
+			const size = this.get_size(addr)
+			addr = addr + size
+		}
+
 		this.SP = this.FP;
 		this.FP = this.get_Blockframe_FP();
 
@@ -628,24 +642,92 @@ class Stack {
 		// this.print_stack_state()
 	}
 
+
+	// actual string value is heap allocated
+	allocate_String(x: StringRustValue): number {
+		const stack_address = this.allocate(String_tag, 2); // first word is tag, 2nd word is address to the heap string
+
+		const heap_address = HEAP.allocateString(x);
+
+		this.set(stack_address + 1, heap_address);
+
+		return stack_address;
+	}
+
+	is_String(address: number): boolean {
+		return this.get_tag(address) === String_tag;
+	}
+
+	// returns string node from heap
+	get_String(address: number): StringRustValue {
+		const heap_addr = this.get_child(address, 0); // child is 0-index
+		return HEAP.getString(heap_addr);
+	}
 }
 
 class Heap {
-	
+	// Only String, Env and Env Frame nodes are allocated on Heap
 	private heap: DataView;
 	private free: number = 0;
 	private stringPool: Record<number, { address: number; string: string }[]> = {};
+	private allocatedAddresses: Set<number>[] = [new Set()]
+	n_nodes_used: number = 0;
 
-	constructor(bytes: number) {
-		if (bytes % word_size !== 0) throw new Error("heap bytes must be divisible by 8");
-		this.heap = new DataView(new ArrayBuffer(bytes));
+	constructor(heap_size_bytes: number) {
+		if (heap_size_bytes % (word_size * node_size) !== 0) throw new Error("heap bytes must be divisible by word size * node size");
+		this.heap = new DataView(new ArrayBuffer(heap_size_bytes));
+
+		// set up linked list of free nodes
+		let i
+		for (i = 0; i < heap_size_bytes / word_size - node_size; i = i + node_size) {
+			this.set(i, i + node_size)
+		}
+		this.set(i, -1)
+	}
+
+	private addToAllocatedAddresses(address: number) {
+		peek(this.allocatedAddresses, 0).add(address)
+	}
+
+	extendAllocatedAddress() {
+		push(this.allocatedAddresses, new Set())
+	}
+
+	private freeMem(address: number) {
+		// sanity check
+		if (is_stack_address(address)) {
+			throw new Error("Heap is trying to free stack allocated memory")
+		}
+
+		this.n_nodes_used--
+		this.set(address, this.free)
+		this.free = address
+		
+	}
+
+	freeMemOnExitScope() {
+		const alloced_addresses: Set<number> = this.allocatedAddresses.pop()
+		for (const addr of alloced_addresses) {
+			if (!this.hasOwner(addr)) {
+				this.freeMem(addr)		
+			}
+		}
 	}
 
 	allocate(tag: number, size: number): number {
+		if (size > node_size) {
+            throw new Error("limitation: nodes cannot be larger than 10 words")
+        }
+
+		if (this.free == -1) {
+			throw new Error("Heap memory exhausted")
+		}
+		this.n_nodes_used++
 		const address = this.free;
-		this.free += size;
+		this.free = HEAP.get(this.free);
 		this.heap.setUint8(address * word_size, tag);
 		this.heap.setUint16(address * word_size + size_offset, size);
+		this.addToAllocatedAddresses(address)
 		return address;
 	}
 
@@ -672,11 +754,23 @@ class Heap {
 	getSize(address: number): number {
 		return this.heap.getUint16(address * word_size + size_offset);
 	}
-
+	
 	getNumberOfChildren(address: number): number {
 		return this.getSize(address) - 1;
 	}
 
+	setHasOwner(address: number) {
+		this.setByte(address, 7, 1);
+	}
+
+	unsetHasOwner(address: number) {
+		this.setByte(address, 7, 1);
+	}
+
+	hasOwner(address: number): boolean {
+		return this.getByte(address, 7) === 1
+	}
+	
 	// byte/2byte/4byte utilities
 	setByte(address: number, offset: number, value: number): void {
 		this.heap.setUint8(address * word_size + offset, value);
@@ -698,6 +792,9 @@ class Heap {
 	}
 
 	// String interning
+	// [1 byte tag, 4 byte hash to stringPool,
+	// 2 bytes #children, 1 byte hasOwner]
+	// Note: #children is 0
 	allocateString(stringRust: StringRustValue): number {
 		const string = stringRust.val;
 
@@ -711,6 +808,7 @@ class Heap {
 		const address = this.allocate(String_tag, 2);
 		this.set4Bytes(address, 1, hash);
 		this.set2Bytes(address, 5, pool.length);
+		this.setByte(address, 7, 0)
 		pool.push({ address, string });
 		this.stringPool[hash] = pool;
 
@@ -736,47 +834,11 @@ class Heap {
 		return this.getTag(address) === String_tag;
 	}
 
-	// Closures
-	allocateClosure(arity: number, pc: number, env: number): number {
-		const addr = this.allocate(Closure_tag, 2);
-		this.setByte(addr, 1, arity);
-		this.set2Bytes(addr, 2, pc);
-		this.set(addr + 1, env);
-		return addr;
-	}
-
-	getClosureArity(address: number): number {
-		return this.getByte(address, 1);
-	}
-
-	getClosurePC(address: number): number {
-		return this.get2Bytes(address, 2);
-	}
-
-	getClosureEnv(address: number): number {
-		return this.getChild(address, 0);
-	}
-
-	isClosure(address): boolean {
-		return this.getTag(address) === Closure_tag;
-	}
-
-	// Builtins
-	allocateBuiltin(id: number): number {
-		const addr = this.allocate(Builtin_tag, 1);
-		this.setByte(addr, 1, id);
-		return addr;
-	}
-
-	getBuiltinId(address: number): number {
-		return this.getByte(address, 1);
-	}
-
-	isBuiltin(address: number): boolean {
-		return this.getTag(address) === Builtin_tag;
-	}
 
 	// Environments
+	// [1 byte tag, 4 bytes unused,
+	//  2 bytes #children, 1 byte unused]
+	// followed by the addresses of its frames
 	allocateEnvironment(numFrames: number): number {
 		return this.allocate(Environment_tag, numFrames + 1);
 	}
@@ -802,6 +864,9 @@ class Heap {
 	}
 
 	// Env Frame
+	// [1 byte tag, 4 bytes unused,
+	//  2 bytes #children, 1 byte unused]
+	// followed by the addresses of its values
 	allocateFrame(numberOfValues: number): number {
 		return this.allocate(Frame_tag, numberOfValues + 1);
 	}
@@ -950,10 +1015,9 @@ class Heap {
 // 	}
 
 // 	const address = heap_allocate(String_tag, 2);
-// 	heap_set_4_bytes_at_offset(address, 1, hash);
-// 	heap_set_2_bytes_at_offset(address, 5, 0);
-
-// 	// Store {address, string} in the string pool under hash at index 0
+// 	heap_set_4_bytes_at_offset(// [1 byte tag, 1 byte id, 3 bytes unused,
+//  2 bytes #children, 1 byte unused]
+// Note: #children is 0in the string pool under hash at index 0
 // 	stringPool[hash] = [{address, string}];
 
 // 	return address;
@@ -1346,7 +1410,7 @@ const microcode = {
 	GOTO: (instr) => (PC = instr.addr),
 	ENTER_SCOPE: (instr) => {
 		STACK.allocate_Blockframe(E);
-
+		HEAP.extendAllocatedAddress();
 		const frame_address = HEAP.allocateFrame(instr.num);
 		E = HEAP.extendEnvironment(frame_address, E);
 
@@ -1360,7 +1424,8 @@ const microcode = {
 			throw new Error("Current stack frame is not a block frame when EXIT_SCOPE instruction is executed.")
 		}
 
-		// TODO: free mem in the heap (environmnent node + latest env frame)
+		// free memory on heap
+		HEAP.freeMemOnExitScope()
 
 		// restore the environment
 		E = STACK.get_Blockframe_environment();
@@ -1410,7 +1475,7 @@ const microcode = {
 		} else {
 
 			// RHS is an object on the heap. We should do a move instead of copy.
-			// TODO: mark RHS object as moved (so it will not get freed?)
+			HEAP.setHasOwner(RHS_address)
 
 			HEAP.setEnvValue(E, instr.pos, RHS_address)
 		}
@@ -1453,9 +1518,10 @@ const microcode = {
 		const fun = peek(OS, arity); // an address to a closure, either built-in or user-defined
 
 		if (STACK.compare_tag(fun, Builtin_tag)) {
-			return apply_builtin(HEAP.getBuiltinId(fun)); // TODO: change to Stack
+			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
 
+		HEAP.extendAllocatedAddress();
 		// else, must a be a user defined function. Stored on the stack
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
@@ -1476,7 +1542,7 @@ const microcode = {
 		const arity = instr.arity;
 		const fun = peek(OS, arity);
 		if (STACK.compare_tag(fun, Builtin_tag)) {
-			return apply_builtin(HEAP.getBuiltinId(fun)); // TODO: change to Stack
+			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
 
 		const frame_address = HEAP.allocateFrame(arity);
@@ -1511,10 +1577,10 @@ const microcode = {
 		push(OS, STACK.get_Reference_target(reference_address));
 	},
 	RESET: (instr) => {
-		// TODO: free current env node + lastest env frame
 
 		while (STACK.is_Blockframe()) {
 			// TODO: free environment node + latest env frame of this block frame
+			HEAP.freeMemOnExitScope()
 
 			// Restore FP. No need to restore E.
 			STACK.pop_Blockframe();
@@ -1523,6 +1589,7 @@ const microcode = {
 		
 		// Current stack frame must be the first call frame
 		// TODO: free heap + environment
+		HEAP.freeMemOnExitScope()
 
 		// restore PC, E and FP
 		PC = STACK.get_Callframe_PC()
@@ -1600,7 +1667,7 @@ function run(instrs) {
 	PC = 0;
 	
 	// initialize heap
-	const heap_size = 1000000 
+	const heap_size = 1000000
 	HEAP = new Heap(heap_size);
 	
 	E = initializeGlobalEnvironment();
@@ -1620,6 +1687,8 @@ function run(instrs) {
 		STACK.print_stack_state()
 		print_OS()
 	}
+
+	console.log("Heap nodes leaked: " + HEAP.n_nodes_used)
 
 	const value_in_Rust = address_to_Rust_value(peek(OS, 0));
 	return value_in_Rust.val;
