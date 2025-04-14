@@ -54,6 +54,7 @@ const Pair_tag = 11;
 const Builtin_tag = 12;
 const String_tag = 13;
 const Reference_tag = 14;
+const Unassigned_tag = 15;
 
 
 /* *************************
@@ -69,15 +70,23 @@ const mega = 2 ** 20;
  * *************************/
 
 class Stack {
-
+	
 	private stack: DataView;
 
+	// Stack's metadata
 	private start_addr: number; 	// lower bound
 	private end_addr: number; 		// upper bound
 	private size_offset: number; 	// number of offset bytes in the first word
 
+	// Registers
 	private SP: number; 			// Stack Pointer: points to the top of the stack
 	private FP: number;				// Frame Pointer: points to the start of the current frame
+
+	// Canonical values = SINGLETONS
+	public TRUE: number;
+	public FALSE: number;
+	public UNIT: number;
+	public UNASSIGNED: number;
 
 	constructor(bytes: number, starting_address: number) {
 		if (bytes % word_size !== 0) 
@@ -98,7 +107,26 @@ class Stack {
 		this.SP = starting_address;
 	}
 
+	
+	/**
+	 * We allocate canonical values for true, false, unit (undefined), unassigned
+	 * and make sure no such values are created at runtime
+	 */
+	init_Canonicals() {
+		// boolean values carry their value (0 for false, 1 for true)
+		// in the byte following the tag
+		this.FALSE = STACK.allocate_False();
+		this.TRUE = STACK.allocate_True();
+		this.UNIT = STACK.allocate_Unit();
+		this.UNASSIGNED = STACK.allocated_Unassigned()
+	}
+
 	print_stack_state(): void {
+
+		if (!LOGGING_ENABLED) {
+			return;
+		}
+
         console.log("=== Stack State (Raw Bits) ===");
         console.log(`Bounds: [${this.start_addr}..${this.end_addr}] (${(this.end_addr - this.start_addr) * word_size} bytes)`);
         console.log(`Registers: FP = ${this.FP}, SP = ${this.SP}`);
@@ -159,7 +187,8 @@ class Stack {
             [Pair_tag]: "Pair",
             [Builtin_tag]: "Builtin",
             [String_tag]: "String",
-            [Reference_tag]: "Reference"
+            [Reference_tag]: "Reference",
+			[Unassigned_tag]: "Unassigned"
         };
         return tagMap[tag] || `Unknown`;
     }
@@ -170,6 +199,48 @@ class Stack {
 
 	convert_to_virtual_addr(address: number): number {
 		return address % this.start_addr;
+	}
+
+	set_raw_word(address: number, raw_word: bigint) {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		this.stack.setBigUint64(virtual_address * word_size, raw_word);
+	}
+
+	get_raw_word(address: number): bigint {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		return this.stack.getBigUint64(virtual_address * word_size);
+	}
+
+	/**
+	 *  Performs a shallow copy of the node at target address to the destination address.
+	 * 
+	 * @param destination_addr Address of node to copy to.
+	 * @param target_addr Address of node to copy from.
+	 */
+	shallow_copy(destination_addr: number, target_addr: number) {
+		if (this.is_out_of_range(destination_addr)) {
+			throw new Error("destination_addr is out of range. Is it really a stack address?")
+		}
+
+		if (this.is_out_of_range(target_addr)) {
+			throw new Error("target_addr is out of range. Is it really a stack address?")
+		}
+		
+		const target_size: number = this.get_size(target_addr);
+		const dest_size: number = this.get_size(destination_addr);
+
+		// this should be handled by the Typechecker! Cannot assign a different type to a variable
+		if (dest_size !== target_size) {
+			throw new Error("Cannot copy more or fewer words than the size of the destination node.")
+		}
+
+		// copy words as raw 64-bit chunks
+		for (let i = 0; i < target_size; i++) {
+			
+			// Read and write raw bits (no type interpretation)
+			const raw_word_bits = this.get_raw_word(target_addr + i);			
+			this.set_raw_word(destination_addr + i, raw_word_bits);
+		}
 	}
 
 	// allocate "size" number of words on the stack
@@ -283,6 +354,10 @@ class Stack {
 		return this.get_tag(address) === True_tag
 	}
 
+	is_Boolean(address: number): boolean {
+		return this.is_True(address) || this.is_False(address);
+	}
+
 	allocate_Unit(): number {
         return this.allocate(Unit_tag, 1);
     }
@@ -291,9 +366,34 @@ class Stack {
         return this.get_tag(address) === Unit_tag;
     }
 
+	allocated_Unassigned() {
+        return this.allocate(Unassigned_tag, 1);
+	}
+	
+	is_Unassigned(address: any) {
+		return this.get_tag(address) === Unassigned_tag;
+	}
+
+	set_Int32(address: number, x: number) {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		this.stack.setInt32(virtual_address * word_size, x);
+	}
+
+	get_Int32(address: number): number {
+		const virtual_address = this.convert_to_virtual_addr(address);
+		return this.stack.getInt32(virtual_address * word_size);
+	}
+	
+	/**
+	 * Allocates an I32 node on the stack. 
+	 * First word stores the tag, second word stores the I32 encoding.
+	 * 
+	 * @param x The Rust I32 value.
+	 * @returns The address of the newly allocated I32 node.
+	 */
     allocate_I32(x: I32RustValue): number {
         const number_address = this.allocate(I32_tag, 2);
-        this.set(number_address + 1, x.val);
+        this.set_Int32(number_address + 1, x.val); // decode as Int32 instead of Float64
         return number_address;
     }
 
@@ -302,12 +402,12 @@ class Stack {
     }
 
 	get_I32(address: number): I32RustValue {
-		return new I32RustValue(STACK.get(address + 1)); // second word in i32 node stores the number
+		return new I32RustValue(STACK.get_Int32(address + 1)); // second word in i32 node stores the number
 	}
 
 	allocate_F64(x: F64RustValue): number {
         const number_address = this.allocate(F64_tag, 2);
-        this.set(number_address + 1, x.val);
+        this.set(number_address + 1, x.val); // this.set and this.get encode/decode using Float64 by default
         return number_address;
     }
 
@@ -341,7 +441,7 @@ class Stack {
 	//  1 byte unused, 2 bytes #children, 1 byte unused]
 	// followed by the address of env
 	allocate_Callframe(env_address: number, pc: number): number {
-		log(`Stack before allot:`, "ALLOCATING CALL FRAME")
+		// log(`Stack before allot:`, "ALLOCATING CALL FRAME")
 		// this.print_stack_state();
 
 		const address = this.allocate(Callframe_tag, 3);
@@ -353,7 +453,7 @@ class Stack {
 		// FP points to the start of this call frame
 		this.FP = address; 
 
-		log(`Stack after allot:`, "ALLOCATING CALL FRAME")
+		// log(`Stack after allot:`, "ALLOCATING CALL FRAME")
 		// this.print_stack_state();
 
 		return address;
@@ -376,7 +476,7 @@ class Stack {
 	}
 
 	pop_Callframe() {
-		log(`Stack before pop:`, "POP CALL FRAME")
+		// log(`Stack before pop:`, "POP CALL FRAME")
 		// this.print_stack_state();
 
 		// sanity check
@@ -387,7 +487,7 @@ class Stack {
 		this.SP = this.FP;
 		this.FP = this.get_Callframe_FP();
 
-		log(`Stack after pop:`, "POP CALL FRAME")
+		// log(`Stack after pop:`, "POP CALL FRAME")
 		// this.print_stack_state();
 
 	}
@@ -398,7 +498,7 @@ class Stack {
 	// followed by the address of env
 	allocate_Blockframe(env_addr: number): number {
 
-		log(`Stack before allot:`, "ALLOCATING BLOCK FRAME")
+		// log(`Stack before allot:`, "ALLOCATING BLOCK FRAME")
 		// this.print_stack_state();
 
 		const address = this.allocate(Blockframe_tag, 3);
@@ -408,7 +508,7 @@ class Stack {
 		// FP points to the start of this block frame
 		this.FP = address; 
 
-		log(`Stack after allot:`, "ALLOCATING BLOCK FRAME")
+		// log(`Stack after allot:`, "ALLOCATING BLOCK FRAME")
 		// this.print_stack_state()
 
 		return address;
@@ -427,7 +527,7 @@ class Stack {
 	}
 
 	pop_Blockframe() {
-		log(`Stack before pop:`, "[POP BLOCK FRAME]")
+		// log(`Stack before pop:`, "[POP BLOCK FRAME]")
 		// this.print_stack_state()
 
 		// sanity check
@@ -438,7 +538,7 @@ class Stack {
 		this.SP = this.FP;
 		this.FP = this.get_Blockframe_FP();
 
-		log(`Stack after pop:`, "[POP BLOCK FRAME]")
+		// log(`Stack after pop:`, "[POP BLOCK FRAME]")
 		// this.print_stack_state()
 	}
 
@@ -447,6 +547,7 @@ class Stack {
 const stack_size = 1000000; 			// 125000 word addresses
 const stack_starting_addr = 1000000; 	// assuming heap ends at address 999999 for now
 const STACK = new Stack(stack_size, stack_starting_addr)
+STACK.init_Canonicals();
 
 /* *************************
  * HEAP
@@ -552,22 +653,7 @@ const heap_get_4_bytes_at_offset = (address, offset) =>
 // and the value is a tuple of the address of the string and the string itself
 let stringPool = {}; // ADDED CHANGE
 
-// We allocate canonical values for
-// true, false, unit (undefined)
-// and make sure no such values are created at runtime
-//
-// boolean values carry their value (0 for false, 1 for true)
-// in the byte following the tag
-const False = STACK.allocate_False();
-const is_False = (address) => STACK.is_False(address);
 
-const True = STACK.allocate_True();
-const is_True = (address) => STACK.is_True(address);
-
-const is_Boolean = (address) => is_True(address) || is_False(address);
-
-const Unit = STACK.allocate_Unit();
-const is_Unit = (address) => STACK.is_Unit(address);
 
 // ADDED CHANGE
 // strings:
@@ -793,8 +879,8 @@ const address_to_Rust_value = (address: number): RustValue => {
 
 		value = is_String(address) 
 			? new StringRustValue(heap_get_string(address)) 
-			// : is_Closure(address)
-			// ? "<closure>"
+			: is_Closure(address)
+			? new RustValue("<closure>") // we should not use the value at all
 			// : is_Builtin(address)
 			// ? "<builtin>"
 			: undefined
@@ -811,7 +897,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 const Rust_value_to_address = (x: RustValue): number => {
 
 	if (x instanceof BooleanRustValue) {
-		return x.val ? True : False;
+		return x.val ? STACK.TRUE : STACK.FALSE;
 	}
 
 	if (x instanceof I32RustValue) {
@@ -827,8 +913,12 @@ const Rust_value_to_address = (x: RustValue): number => {
 	}
 
 	if (x instanceof UnitRustValue) {
-		return Unit;
+		return STACK.UNIT;
 	}
+
+	// if (x instanceof UnassignedRustValue) {
+	// 	return STACK.UNASSIGNED;
+	// }
 
 	if (x instanceof StringRustValue) {
 		return heap_allocate_String(x);
@@ -1003,7 +1093,7 @@ const microcode = {
 	UNOP: (instr) => push(OS, apply_unop(instr.sym, OS.pop())),
 	BINOP: (instr) => push(OS, apply_binop(instr.sym, OS.pop(), OS.pop())),
 	POP: (instr) => OS.pop(),
-	JOF: (instr) => (PC = is_True(OS.pop()) ? PC : instr.addr), // TODO: check on stack
+	JOF: (instr) => (PC = STACK.is_True(OS.pop()) ? PC : instr.addr),
 	GOTO: (instr) => (PC = instr.addr),
 	ENTER_SCOPE: (instr) => {
 		STACK.allocate_Blockframe(E);
@@ -1012,7 +1102,7 @@ const microcode = {
 		E = heap_Environment_extend(frame_address, E);
 
 		for (let i = 0; i < instr.num; i++) {
-			heap_set_child(frame_address, i, Unit); // all variable are unassigned initially
+			heap_set_child(frame_address, i, STACK.UNASSIGNED); // all variable are unassigned initially
 		}
 	},
 	EXIT_SCOPE: (instr) => {
@@ -1035,7 +1125,45 @@ const microcode = {
 		// if (is_Unit(val)) error("access of unassigned variable"); => should be checked on the type checker already!
 		push(OS, addr); 
 	},
-	ASSIGN: (instr) => heap_set_Environment_value(E, instr.pos, peek(OS, 0)),
+	ASSIGN: (instr) => {
+		// e.g, LHS = RHS
+
+		const RHS_address = peek(OS, 0);
+
+		if (is_stack_address(RHS_address)) {
+
+			const LHS_address = heap_get_Environment_value(E, instr.pos);
+			if (!is_stack_address(LHS_address)) {
+				throw new Error("This variable should be of primitive type and resides on the stack as well.")
+			} 
+
+			if (STACK.is_Unassigned(LHS_address)) {
+				// LHS variable is unassigned (after a block scan)
+				// we initialize a new address to the variable now.
+				heap_set_Environment_value(E, instr.pos, RHS_address)
+
+			} else if (STACK.is_Unit(LHS_address) || STACK.is_Boolean(LHS_address)) {
+				// If LHS variable is a canonical value, we simply assign the new address
+				// to the variable (Since canon values are Singletons and should not be copied)
+				heap_set_Environment_value(E, instr.pos, RHS_address)
+			
+			} else {
+
+				// this means the variable was already initialized. 
+				// We should perform shallow copy from RHS to LHS, since 
+				// RHS value may go out of scope.
+				STACK.shallow_copy(LHS_address, RHS_address);
+			}
+
+		} else {
+
+			// RHS is an object on the heap. We should do a move instead of copy.
+			// TODO: mark RHS object as moved (so it will not get freed?)
+
+			heap_set_Environment_value(E, instr.pos, RHS_address)
+		}
+
+	},
 	LDF: (instr) => {
 		const closure_address = heap_allocate_Closure(instr.arity, instr.addr, E);
 		push(OS, closure_address);
@@ -1118,14 +1246,15 @@ function run(instrs) {
 	E = global_environment;
 	stringPool = {}; 
 
-	// todo: clear stack and heap?? but clear what?? stack and heap should be initialized with global env and canonical values (true, false, unit)
+	// TODO: clear stack and heap before every run. stack and heap should be initialized with global env and canonical values (true, false, unit)
 
 	while (!(instrs[PC].tag === "DONE")) {
 		const instr = instrs[PC++];
+		log(JSON.stringify(instr), "INS")
+		
 		microcode[instr.tag](instr);
-
-		// log(JSON.stringify(instr), "INS")
-		// STACK.print_stack_state()
+		STACK.print_stack_state()
+		print_OS()
 	}
 
 	//print_OS()
@@ -1144,6 +1273,8 @@ export class RustVirtualMachine {
 
 // debugging
 const print_OS = () => {
+	if (!LOGGING_ENABLED) return
+
 	console.log("Printing OS:\n")
 	for (let i = 0; i < OS.length; i = i + 1) {
 		const val = OS[i];
