@@ -283,7 +283,7 @@ fn fail_lookup_scope() {
 
     funky();
 }
-`, "Cannot find symbol")
+`, "Type error in pathExpression; [lookup_type] Variable x is from an outer scope.")
 
 test_typechecker(`
 fn pass_lookup_scope() {
@@ -400,12 +400,12 @@ test_typechecker(`
             return a;
         }
     }
-    `, "Type error in function declaration; Function parameter can only have one reference type as lifetime annotation not supplied/supported.") 
+    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.") 
 
 test_typechecker(`
     fn pass_ref_inner_type_consistent() {
-        fn test(a: &mut string) -> &mut string {
-            return a;
+        fn test(a: &mut string) {
+            return;
         }        
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
@@ -413,7 +413,8 @@ test_typechecker(`
         let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
     }
     `, "")
-    
+
+
 test_typechecker(`
     fn fail_ref_inner_type_consistent() {
         fn test(a: &mut string) -> &mut string {
@@ -421,10 +422,102 @@ test_typechecker(`
         }        
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        x_ref = test(x_ref); // move x_ref into function
-        let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
+        test(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
+        let mut x_ref_2: &mut string = &mut x; 
     }
-    `, "", true) // TODO: this should fail?
+    `, "Type error in pathExpression; use (read/write) of a mutably borrowed value")
+        
+
+test_typechecker(`
+    fn fail_move_ref_in_fn_reassign() {
+        fn test(a: &mut string) -> &mut string {
+            return a;
+        }        
+        let mut x: string = "123";
+        let mut x_ref: &mut string = &mut x;
+        x_ref = test(x_ref); // cannot assign to moved value
+    }
+    `, "Type error in let statement; Cannot assign to a moved value.")
+
+test_typechecker(`
+    fn fail_move_ref_in_fn() {
+        fn test(a: &mut string) -> &mut string {
+            return a;
+        }        
+        let mut x: string = "123";
+        let mut x_ref: &mut string = &mut x;
+        test(x_ref); // move x_ref
+        x_ref = &mut "test"; // use moved value
+    }
+    `, "Type error in pathExpression; use of a moved value")
+
+
+test_typechecker(`
+    fn pass_no_move_immutable_ref() {
+        fn test(a: & string) -> & string {
+            return a;
+        }        
+        let x: string = "123";
+        let x_ref: & string = & x;
+        test(x_ref); // no move x_ref since immutable ref
+        test(x_ref);
+    }
+    `, "")
+
+test_typechecker(`
+    fn pass_higher_order_fn() {
+        fn apply_function(func: fn(i32) -> i32, value: i32) -> i32 {
+            func(value) + value
+        }
+
+        fn double(x: i32) -> i32 {
+            x * 2
+        }
+        let result: i32 = apply_function(double, 5);
+    }
+    `, "")
+
+test_typechecker(`
+    fn pass_higher_order_fn_with_refs() {
+        fn apply_function(func: fn(& i32) -> i32, value: & i32) -> i32 {
+            func(value) + *value
+        }
+
+        fn double(x: &i32) -> i32 {
+            *x * 2
+        }
+        let result: i32 = apply_function(double, &5);
+    }
+    `, "")
+
+test_typechecker(`
+    fn fail_closure_check_bare_fn() {
+        // function cant take in more than one ref if return ref
+        fn apply_function(func: fn(&i32, &i32) -> &i32) {}
+    }
+    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.")
+
+test_typechecker(`
+    fn fail_closure_check_ret_type_bare_fn() {
+        fn apply_function(func: fn(&i32) -> &mut i32) {}
+    }
+    `, "Type error in ClosureType construction; Returned ref must have same type as argument ref.")
+
+
+test_typechecker(`
+    fn fail_lookup_unbound_var() {
+        abc = 10;
+    }
+    `, "Type error in pathExpression; [lookup_type] Unbound variable abc.")
+
+test_typechecker(`
+    fn fail_deref_non_ref_type() {
+        let x: i32 = 123;
+        *x;
+    }
+    `, "Type error; dereferencing a non-reference type: i32")
+        
+    
 
 const test_compiler = (code: string) => {
     const inputStream = CharStream.fromString(code);

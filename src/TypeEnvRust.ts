@@ -3,7 +3,6 @@
  * *****************/
 
 import { assert } from "console";
-import { print_error } from "./Utils.js"
 import { log, print_or_throw_error } from "./TypeCheckerRust.js";
 
 /* **********************
@@ -65,7 +64,7 @@ export class TypeEnvironment {
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
                 if (must_be_closure && !(type_found instanceof ClosureType)) {
-                    print_error("[lookup_type] Variable from outer scope: " + x)
+                    print_or_throw_error(`Type error in pathExpression; [lookup_type] Variable ${x} is from an outer scope.`)
                     return undefined;
                 }
                 return type_found
@@ -82,7 +81,7 @@ export class TypeEnvironment {
             return this.global_type_frame.frame[x]
         }
 
-        print_error("[lookup_type] Unbound name: " + x)
+        print_or_throw_error(`Type error in pathExpression; [lookup_type] Unbound variable ${x}.`)
         return undefined;
     }
 
@@ -186,6 +185,10 @@ export abstract class Type {
         this.MutableBorrowExists = false
         this.ImmutableBorrowCount = 0
     }
+
+    mark_moved() {
+        this.IsMoved = true
+    }
 }
 
 export class ScalarType extends Type {
@@ -207,11 +210,31 @@ export class UnitType extends Type {
 export class ClosureType extends Type {
     ParamTypes: Type[]
     ReturnType: Type
-    constructor(paramTypes: Type[], returnTypes: Type) { // function is never mutable, and never moved.
+    constructor(paramTypes: Type[], returnType: Type) { // function is never mutable, and never moved.
         super()
+        this.checkValidParamAndReturnTypes(paramTypes, returnType)
         this.ParamTypes = paramTypes
-        this.ReturnType = returnTypes
+        this.ReturnType = returnType
         this.TypeName = "closure"
+    }
+
+    checkValidParamAndReturnTypes(paramTypes: Type[], returnType: Type) {
+        // Only allow function to take in at most a single param type if returnType is RefType
+        if (returnType instanceof RefType) {
+            let found: boolean = false
+            for (const type of paramTypes) {
+                if (type instanceof RefType) {
+                    if (found) {
+                        print_or_throw_error("Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.")
+                    }
+
+                    if (!compare_type(type, returnType)) {
+                        print_or_throw_error("Type error in ClosureType construction; Returned ref must have same type as argument ref.")
+                    }
+                    found = true
+                }
+            }
+        }
     }
 }
 
@@ -254,6 +277,10 @@ export class MutableRefType extends RefType {
         super()
         this.InnerType = innerType
         this.IsMutable = is_mut
+    }
+    mark_moved() {
+        super.mark_moved()
+        this.InnerType.MutableBorrowExists = false
     }
 }
 
