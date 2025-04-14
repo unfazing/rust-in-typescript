@@ -362,13 +362,27 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         return symbol
     }
 
+    // (AND | ANDAND) KW_MUT? expression
     visitBorrowExpression(ctx: BorrowExpressionContext): undefined {
         this.visit(ctx.expression())
+        const is_mut_borrow: boolean = (ctx.KW_MUT() !== null);
+
         instrs[wc++] = {
             tag: "REF",
+            is_mutable: is_mut_borrow,
+        }
+
+        if (ctx.ANDAND()) {
+            // a reference to a reference,
+            // hence add one more ref instruction
+            instrs[wc++] = {
+                tag: "REF",
+                is_mutable: false,
+            }
         }
     }
 
+    // STAR expression
     visitDereferenceExpression(ctx: DereferenceExpressionContext): undefined {
         this.visit(ctx.expression())
         instrs[wc++] = {
@@ -459,16 +473,42 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
+        
+        // evaluate/compile RHS 
+        // push the address on the OS
+        let expr = this.visit(ctx.expression(1)) 
+
+        // unwrapping parentheses in group expression
+        let LHS: ExpressionContext = ctx.expression(0);
+        while (LHS instanceof GroupedExpressionContext) {
+            LHS = LHS.expression();
+        }
+
+        // if (LHS instanceof DereferenceExpressionContext) {
+        //     log(`ASSIGNING A DEREF: ${LHS.getText()}`, "ASSIGNMENT_EXPRESSION")
+
+        //     // push the address of the reference node on the OS
+        //     this.visit(LHS.expression())
+
+        //     // do a deref assignment
+        //     instrs[wc++] = {
+        //         tag: "ASSIGN_FROM_DEREF", // immutable assign
+        //     };
+
+        //     return; // terminate early
+        // }
+        
         let symbol = this.visitChildren(ctx.expression(0).getChild(0)) // visit children of pathExpression to avoid adding LD instr
         log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
-        let expr = this.visit(ctx.expression(1)) // TODO: !!! this should somehow save the evaluated value to OP stack
         
         log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
-        
         instrs[wc++] = {
             tag: "ASSIGN", // immutable assign
             pos: compile_time_environment_position(ce, symbol),
         };
+
+        // assignment always have the unit type () in Rust!
+		instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; 
     }
 
     // KW_RETURN expression?

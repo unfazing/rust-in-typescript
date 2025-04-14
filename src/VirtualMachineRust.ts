@@ -70,7 +70,7 @@ const mega = 2 ** 20;
  * *************************/
 
 class Stack {
-	
+
 	private stack: DataView;
 
 	// Stack's metadata
@@ -82,9 +82,9 @@ class Stack {
 	private FP: number;				// Frame Pointer: points to the start of the current frame
 
 	// Canonical values = SINGLETONS
-	public TRUE: number;
-	public FALSE: number;
-	public UNIT: number;
+	// public TRUE: number;
+	// public FALSE: number;
+	// public UNIT: number;
 	public UNASSIGNED: number;
 
 	constructor(bytes: number, starting_address: number) {
@@ -113,9 +113,9 @@ class Stack {
 	init_Canonicals() {
 		// boolean values carry their value (0 for false, 1 for true)
 		// in the byte following the tag
-		this.FALSE = STACK.allocate_False();
-		this.TRUE = STACK.allocate_True();
-		this.UNIT = STACK.allocate_Unit();
+		// this.FALSE = STACK.allocate_False();
+		// this.TRUE = STACK.allocate_True();
+		// this.UNIT = STACK.allocate_Unit();
 		this.UNASSIGNED = STACK.allocated_Unassigned()
 	}
 
@@ -239,6 +239,23 @@ class Stack {
 			const raw_word_bits = this.get_raw_word(target_addr + i);			
 			this.set_raw_word(destination_addr + i, raw_word_bits);
 		}
+	}
+
+	/**
+	 * Allocate a new node on the current stack frame of the same size as the target node.
+	 * Then copy the target node over to the destination address.
+	 * 
+	 * @param target_address 
+	 * @returns 
+	 */
+	create_copy(target_address: number): number {
+		const target_size: number = this.get_size(target_address);
+		const target_tag: number = this.get_tag(target_address);
+
+		const destination_address = this.allocate(target_tag, target_size);
+		this.shallow_copy(destination_address, target_address);
+
+		return destination_address;
 	}
 
 	// allocate "size" number of words on the stack
@@ -431,8 +448,32 @@ class Stack {
 	is_Char(address: number): boolean {
         return this.get_tag(address) === Char_tag;
 	}
+	
+	// [1 byte tag, 1 byte is_mut, 3 bytes unused, 2 bytes #children, 1 byte unused]
+	// followed by the address of referenced object.
+	allocate_Reference(target_addr: number, is_mut_borrow: boolean): number {
+		const address = this.allocate(Reference_tag, 2);
 
-	// TODO: allocate reference
+		// set mutability of borrow at 2nd byte in first word
+		this.set_byte_at_offset(address, 1, (is_mut_borrow ? 1 : 0));
+
+		// set the target address (what this reference points to)
+		this.set(address + 1, target_addr)
+
+		return address;
+	}
+
+	get_Reference_target(address: number): number {
+		return this.get_child(address, 0)
+	}
+
+	get_Reference_mutability(address: number): number {
+		return this.get_byte_at_offset(address, 1); // 1 or 0
+	}
+
+	is_Reference(address: number): boolean {
+		return this.get_tag(address) === Reference_tag;
+	}
 
 	// call frame
 	// [1 byte tag, 1 byte unused, 2 bytes pc,
@@ -541,7 +582,6 @@ class Stack {
 	}
 
 }
-
 
 class Heap {
 	
@@ -1049,6 +1089,8 @@ const address_to_Rust_value = (address: number): RustValue => {
 			? STACK.get_Char(address) // return a CharRustValue
 			: STACK.is_Unit(address)
 			? new UnitRustValue()
+			: STACK.is_Reference(address)  
+			? new RustValue("reference") // TODO: create a proper wrapper for reference? For debugging purposes mostly
 			: undefined
 
 	} else {
@@ -1073,7 +1115,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 const Rust_value_to_address = (x: RustValue): number => {
 
 	if (x instanceof BooleanRustValue) {
-		return x.val ? STACK.TRUE : STACK.FALSE;
+		return x.val ? STACK.allocate_True() : STACK.allocate_False();
 	}
 
 	if (x instanceof I32RustValue) {
@@ -1089,7 +1131,7 @@ const Rust_value_to_address = (x: RustValue): number => {
 	}
 
 	if (x instanceof UnitRustValue) {
-		return STACK.UNIT;
+		return STACK.allocate_Unit();
 	}
 
 	if (x instanceof StringRustValue) {
@@ -1223,10 +1265,6 @@ const apply_builtin = (builtin_id) => {
 	push(OS, result);
 };
 
-// creating global runtime environment
-
-
-			
 
 /* *******
  * machine
@@ -1281,7 +1319,7 @@ const microcode = {
 	ASSIGN: (instr) => {
 		// e.g, LHS = RHS
 
-		const RHS_address = peek(OS, 0);
+		const RHS_address = OS.pop();
 
 		if (is_stack_address(RHS_address)) {
 
@@ -1293,13 +1331,16 @@ const microcode = {
 			if (STACK.is_Unassigned(LHS_address)) {
 				// LHS variable is unassigned (after a block scan)
 				// we initialize a new address to the variable now.
-				HEAP.setEnvValue(E, instr.pos, RHS_address)
 
-			} else if (STACK.is_Unit(LHS_address) || STACK.is_Boolean(LHS_address)) {
-				// If LHS variable is a canonical value, we simply assign the new address
-				// to the variable (Since canon values are Singletons and should not be copied)
-				HEAP.setEnvValue(E, instr.pos, RHS_address)
-			
+				// create a copy in the current stack frame
+				//
+				// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
+				// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
+				const copy_addr = STACK.create_copy(RHS_address);
+
+				// set the heap address to that copy
+				HEAP.setEnvValue(E, instr.pos, copy_addr) 
+
 			} else {
 
 				// this means the variable was already initialized. 
@@ -1317,6 +1358,34 @@ const microcode = {
 		}
 
 	},
+	// ASSIGN_DEREF: (instr) => {
+	// 	// eg. *x = y;
+	// 	// at this point, the 2 top most values on OS are: OS = [address of y, address of x (a reference node)]
+	// 	const ref_address = OS.pop();
+	// 	if (!STACK.is_Reference(ref_address)) {
+	// 		throw new Error("Dereferencing a non-reference value");
+	// 	}
+
+	// 	const LHS_address = STACK.get_Reference_target(ref_address);
+	// 	const RHS_address = OS.pop()
+
+	// 	// At this point, the typechecker should have validated that 
+	// 	// the target is of the same type as the assignee
+	// 	if (is_stack_address(LHS_address) !== is_stack_address(RHS_address)) {
+	// 		throw new Error("Assignment of different types!" +
+	// 			"A primitive type is assigned to a referenced type or vice versa");
+	// 	}
+		
+	// 	if (is_stack_address(LHS_address)) {
+
+	// 		STACK.shallow_copy(LHS_address, RHS_address);
+			
+	// 	} else {
+	// 		HEAP.
+	// 	}
+
+
+	// },
 	LDF: (instr) => {
 		const closure_address = HEAP.allocateClosure(instr.arity, instr.addr, E);
 		push(OS, closure_address);
@@ -1361,17 +1430,22 @@ const microcode = {
 		);
 		PC = HEAP.getClosurePC(fun);
 	},
-	// REF: (instr) => {
-	// 	const referenced_var = OS.pop()
-	// 	const reference_address = heap_allocate_Reference(referenced_var);
-	// 	push(OS, reference_address);
-	// },
-	// DEREF: (instr) => {
-	// 	const reference_address = OS.pop();
-	// 	assert(is_Reference(reference_address), "Dereferencing a non-reference");;
-	// 	const underlying_value = heap_get_underlying_value(reference_address);
-	// 	push(OS, underlying_value);
-	// },
+	REF: (instr) => {
+		const target_addr: number = OS.pop()
+		const is_mut_borrow = instr.is_mutable;
+
+		const ref_address = STACK.allocate_Reference(target_addr, is_mut_borrow);
+		push(OS, ref_address);
+	},
+	DEREF: (instr) => {
+		const reference_address = OS.pop();
+
+		if (!STACK.is_Reference(reference_address)) {
+			throw new Error("Dereferencing non-reference types");
+		}
+
+		push(OS, STACK.get_Reference_target(reference_address));
+	},
 	RESET: (instr) => {
 		// TODO: free current env node + lastest env frame
 
