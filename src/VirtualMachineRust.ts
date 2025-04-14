@@ -101,9 +101,9 @@ class Stack {
 	private FP: number;				// Frame Pointer: points to the start of the current frame
 
 	// Canonical values = SINGLETONS
-	// public TRUE: number;
-	// public FALSE: number;
-	// public UNIT: number;
+	public TRUE: number;
+	public FALSE: number;
+	public UNIT: number;
 	public UNASSIGNED: number;
 
 	constructor(bytes: number, starting_address: number) {
@@ -132,9 +132,9 @@ class Stack {
 	init_Canonicals() {
 		// boolean values carry their value (0 for false, 1 for true)
 		// in the byte following the tag
-		// this.FALSE = STACK.allocate_False();
-		// this.TRUE = STACK.allocate_True();
-		// this.UNIT = STACK.allocate_Unit();
+		this.FALSE = STACK.allocate_False();
+		this.TRUE = STACK.allocate_True();
+		this.UNIT = STACK.allocate_Unit();
 		this.UNASSIGNED = STACK.allocated_Unassigned()
 	}
 
@@ -1270,7 +1270,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 const Rust_value_to_address = (x: RustValue): number => {
 
 	if (x instanceof BooleanRustValue) {
-		return x.val ? STACK.allocate_True() : STACK.allocate_False();
+		return x.val ? STACK.TRUE : STACK.FALSE;
 	}
 
 	if (x instanceof I32RustValue) {
@@ -1286,7 +1286,7 @@ const Rust_value_to_address = (x: RustValue): number => {
 	}
 
 	if (x instanceof UnitRustValue) {
-		return STACK.allocate_Unit();
+		return STACK.UNIT;
 	}
 
 	if (x instanceof StringRustValue) {
@@ -1479,8 +1479,7 @@ const microcode = {
 		const RHS_address = OS.pop();
 
 		const LHS_address = HEAP.getEnvValue(E, instr.pos);
-		if (STACK.is_heap_allocated_type(RHS_address)) {
-
+		if (!STACK.is_heap_allocated_type(RHS_address)) {
 			if (!is_stack_address(LHS_address)) {
 				throw new Error("This variable should be of primitive type and resides on the stack as well.")
 			} 

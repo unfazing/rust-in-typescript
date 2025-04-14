@@ -632,137 +632,137 @@ const test_VM = (code: string, expectedResult: any, testName?: string) => {
 };
 
 // // Basic expressions
-// test_VM("fn main() -> i32 { 1 }", 1);
-// test_VM("fn main() -> i32 { 2 + 3 }", 5);
-// test_VM("fn main() -> i32 { 1; 2; 3 }", 3);
-// test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3);
-// test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3);
+test_VM("fn main() -> i32 { 1 }", 1);
+test_VM("fn main() -> i32 { 2 + 3 }", 5);
+test_VM("fn main() -> i32 { 1; 2; 3 }", 3);
+test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3);
+test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3);
 
-// // Blocks and variables
-// test_VM(
-//     `
-//     fn main() -> i32 {
-//         let y = 4; 
-//         {
-//             let x = y + 7; 
-//             x * 2
-//         }
-//     }
-//     `, 22,
-// );
+// Blocks and variables
+test_VM(
+    `
+    fn main() -> i32 {
+        let y = 4; 
+        {
+            let x = y + 7; 
+            x * 2
+        }
+    }
+    `, 22,
+);
 
-// // Functions
-// test_VM(
-//     `
-//     fn f() -> i32 { 1 }
-//     fn main() -> i32 { f() }
-//     `, 1,
-// );
+// Functions
+test_VM(
+    `
+    fn f() -> i32 { 1 }
+    fn main() -> i32 { f() }
+    `, 1,
+);
 
-// test_VM(
-//     `
-//     fn f(x: i32) -> i32 { x }
-//     fn main() -> i32 { f(33) }`,
-//     33,
-// );
+test_VM(
+    `
+    fn f(x: i32) -> i32 { x }
+    fn main() -> i32 { f(33) }`,
+    33,
+);
 
-// test_VM(
-//     `
-//     fn f(x: i32, y: i32) -> i32 { x - y }
-//     fn main() -> i32 { f(33, 22) }`,
-//     11,
-// );
+test_VM(
+    `
+    fn f(x: i32, y: i32) -> i32 { x - y }
+    fn main() -> i32 { f(33, 22) }`,
+    11,
+);
 
-// // Recursive functions
-// test_VM(
-//     `
-//     fn fact(n: i32) -> i32 {
-//         if n == 1 { 1 } else { n * fact(n - 1) }
-//     }
-//     fn main() -> i32 { fact(10) }`,
-//     3628800,
-// );
+// Recursive functions
+test_VM(
+    `
+    fn fact(n: i32) -> i32 {
+        if n == 1 { 1 } else { n * fact(n - 1) }
+    }
+    fn main() -> i32 { fact(10) }`,
+    3628800,
+);
 
-// test_VM(
-//     `
-//     fn fact(n: i32) -> i32 { fact_iter(n, 1, 1) }
-//     fn fact_iter(n: i32, i: i32, acc: i32) -> i32 {
-//         if i > n {
-//             acc
-//         } else {
-//             fact_iter(n, i + 1, acc * i)
-//         }
-//     }
-//     fn main() -> i32 { fact(4) }`,
-//     24,
-// );
+test_VM(
+    `
+    fn fact(n: i32) -> i32 { fact_iter(n, 1, 1) }
+    fn fact_iter(n: i32, i: i32, acc: i32) -> i32 {
+        if i > n {
+            acc
+        } else {
+            fact_iter(n, i + 1, acc * i)
+        }
+    }
+    fn main() -> i32 { fact(4) }`,
+    24,
+);
 
-// // Loops
-// test_VM(
-//     `
-//     fn main() -> () {
-//         while false { 1; }
-//     }`,
-//     undefined,
-// );
+// Loops
+test_VM(
+    `
+    fn main() -> () {
+        while false { 1; }
+    }`,
+    undefined,
+);
 
-// test_VM(
-//     `
-//     fn main() -> i32 {
-//         let mut x = 0;
-//         x = 1;
-//         while x < 2 {
-//             1;
-//             x = x + 1;
-//         }
-//         x
-//     }`,
-//     2,
-// );
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        x = 1;
+        while x < 2 {
+            1;
+            x = x + 1;
+        }
+        x
+    }`,
+    2,
+);
 
-// test_VM(
-//     `
-//     fn main() -> i32 {
-//         let mut x = 0;
-//         while x < 10 {
-//             x = x + 1;
-//         }
-//         x
-//     }`,
-//     10, "Max depth??"
-// );
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        while x < 10 {
+            x = x + 1;
+        }
+        x
+    }`,
+    10, "Max depth??"
+);
 
-// test_VM(
-//     `
-//     fn main() -> i32 {
-//         let mut x = 0;
-//         let mut i = 0;
-//         while i < 100 {
-//             let mut j = 0;
-//             while j < 100 {
-//                 x = x + i + j;
-//                 j = j + 1;
-//             }
-//             i = i + 1;
-//         }
-//         x
-//     }`,
-//     990000,
-// );
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        let mut i = 0;
+        while i < 100 {
+            let mut j = 0;
+            while j < 100 {
+                x = x + i + j;
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        x
+    }`,
+    990000,
+);
 
-// test_VM(
-//     `
-//     fn main() -> i32 {
-//         let mut x = 0;
-//         let mut i = 0;
-//         while i < 1000 {
-//             let y = 1;
-//             i = i + 1;
-//         }
-//         i
-//     }`,
-//     1000,
-// );
+test_VM(
+    `
+    fn main() -> i32 {
+        let mut x = 0;
+        let mut i = 0;
+        while i < 1000 {
+            let y = 1;
+            i = i + 1;
+        }
+        i
+    }`,
+    1000,
+);
 
 
 test_VM(
@@ -790,25 +790,25 @@ test_VM(
     `"abc"`,
 );
 
-// test_VM(`
-//     fn main() -> i32 {
-//         let x = 42;
-//         let p = &x;
-//         *p
-//     }`, 42, "i32: basic reference and dereference");
+test_VM(`
+    fn main() -> i32 {
+        let x = 42;
+        let p = &x;
+        *p
+    }`, 42, "i32: basic reference and dereference");
         
-// test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 10;
-//         let p = &mut x;
-//         // *p = 5;
-//         x
-//     }`, 5, "i32: mut reference write-through");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 10;
+        let p = &mut x;
+        // *p = 5;
+        x
+    }`, 5, "i32: mut reference write-through");
         
-// test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 1;
-//         let p = &mut x;
-//         *p = *p + 1;
-//         x
-//     }`, 2, "i32: mutate through reference");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 1;
+        let p = &mut x;
+        *p = *p + 1;
+        x
+    }`, 2, "i32: mutate through reference");
