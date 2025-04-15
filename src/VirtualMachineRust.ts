@@ -636,7 +636,9 @@ class Stack {
 	 * valid (unmoved) stack pointers
 	 */
 	free_heap_allocated_memory() {
-		const address_on_OS = peek(OS, 0); // make sure the result is not freed
+
+		// the address of the OS is the object we are moving out of scope!
+		const address_on_OS = peek(OS, 0); 
 		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
 		
 		let addr = this.FP
@@ -646,7 +648,8 @@ class Stack {
 
 				const heap_addr = this.get_heap_allocated_address(addr)
 
-				// check that heap addr is not result on OS and also not yet freed
+				// DO NOT FREE MEM BECAUSE WE ARE 
+				// MOVING A HEAP-ALLOCATED OBJECT OUT OF THE SCOPE
 				if (is_result_heap_allocated && STACK.get_heap_allocated_address(address_on_OS) === heap_addr) {
 					// do nothing
 				} else {
@@ -916,9 +919,10 @@ class Heap {
 		const address = this.environementStack.pop();
 
 		const n_children = this.getNumberOfChildren(address);
-		const last_frame_addr = this.getChild(address, n_children - 1);
-		// free the last env frame
-		this.freeMem(last_frame_addr);
+		if (n_children > 0) {
+			const last_frame_addr = this.getChild(address, n_children - 1);
+			this.freeMem(last_frame_addr);
+		}
 
 		// free the current env
 		this.freeMem(address);
@@ -930,6 +934,43 @@ class Heap {
 	// followed by the addresses of its values
 	allocateFrame(numberOfValues: number): number {
 		return this.allocate(Frame_tag, numberOfValues + 1);
+	}
+
+	// TODO: init builtins and primitive constants properly
+ 	initializeGlobalEnvironment() {
+		const heap_empty_Environment = HEAP.allocateEnvironment(0);
+
+		const primitive_values = Object.values(primitive_object);
+		const frame_address = HEAP.allocateFrame(primitive_values.length);
+
+		// for (let i = 0; i < primitive_values.length; i++) {
+		// 	const primitive_value = primitive_values[i];
+
+		// 	if (typeof primitive_value === "object" && primitive_value.hasOwnProperty("id")) {
+		// 		heap_set_child(frame_address, i, heap_allocate_Builtin(primitive_value.id));
+
+		// 	} else if (typeof primitive_value === "undefined") {
+		// 		heap_set_child(frame_address, i, Unit);
+
+		// 	} else {
+		// 		heap_set_child(frame_address, i, heap_allocate_Number(primitive_value));
+		// 	}
+		// }
+
+		const global_environment = HEAP.extendEnvironment(
+			frame_address,
+			heap_empty_Environment,
+		);
+
+		return global_environment;
+	}
+
+	freeGlobalEnvironment() {
+		assert(this.environementStack.length == 2, "At the end of the program, there should remain 2 environments left (global and empty environment)")
+
+		while (this.environementStack.length > 0) {
+			this.freeEnvironmentAndLatestFrame();
+		}
 	}
 
 }
@@ -1549,6 +1590,11 @@ const microcode = {
 			STACK.mark_moved(RHS_address);			
 		}
 
+		// finally, push unit value on OS, 
+		// because an assignment expression 
+		// always has Unit value in Rust
+		push(OS, STACK.UNIT)
+
 	},
 	// ASSIGN_DEREF: (instr) => {
 	// 	// eg. *x = y;
@@ -1702,35 +1748,6 @@ const word_to_string = (word) => {
 	return binStr;
 };
 
-// TODO: init builtins and primitive constants properly
-function initializeGlobalEnvironment() {
-	const heap_empty_Environment = HEAP.allocateEnvironment(0);
-
-	const primitive_values = Object.values(primitive_object);
-	const frame_address = HEAP.allocateFrame(primitive_values.length);
-
-	// for (let i = 0; i < primitive_values.length; i++) {
-	// 	const primitive_value = primitive_values[i];
-
-	// 	if (typeof primitive_value === "object" && primitive_value.hasOwnProperty("id")) {
-	// 		heap_set_child(frame_address, i, heap_allocate_Builtin(primitive_value.id));
-
-	// 	} else if (typeof primitive_value === "undefined") {
-	// 		heap_set_child(frame_address, i, Unit);
-
-	// 	} else {
-	// 		heap_set_child(frame_address, i, heap_allocate_Number(primitive_value));
-	// 	}
-	// }
-
-	const global_environment = HEAP.extendEnvironment(
-		frame_address,
-		heap_empty_Environment,
-	);
-
-	return global_environment;
-}
-
 function run(instrs) {
 	OS = [];
 	PC = 0;
@@ -1739,7 +1756,7 @@ function run(instrs) {
 	const heap_size = 1000000
 	HEAP = new Heap(heap_size);
 	
-	E = initializeGlobalEnvironment();
+	E = HEAP.initializeGlobalEnvironment();
 	
 	// initialize stack
 	const stack_size = 1000000; // 125000 word addresses
@@ -1753,21 +1770,39 @@ function run(instrs) {
 		log(JSON.stringify(instr), "INS")
 		
 		microcode[instr.tag](instr);
-		// STACK.print_stack_state()
+		STACK.print_stack_state()
 		print_OS()
 	}
 
+	HEAP.freeGlobalEnvironment();
+
+	let program_value = undefined;
+
+	const value_addr = peek(OS, 0)
+	if (value_addr) {
+		program_value = address_to_Rust_value(value_addr).val;
+
+		if (STACK.is_heap_allocated_type(value_addr)) {
+			HEAP.freeMem(STACK.get_heap_allocated_address(value_addr))
+		}
+	}
+	
 	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
 	console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
+	if (HEAP.n_nodes_used > 0) {
+		throw new Error(`Memory leak! ${HEAP.n_nodes_used} heap nodes are not freed`)
+	}
 
-	const value_in_Rust = address_to_Rust_value(peek(OS, 0));
-	return value_in_Rust.val;
+	return program_value;
 }
 
 export class RustVirtualMachine {
 	constructor() {}
 
 	execute(instructions: Object[]): any {
+		if (instructions.length == 0)
+			return undefined
+
 		return run(instructions)
 	}
 }

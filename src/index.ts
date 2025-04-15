@@ -595,7 +595,7 @@ function printInstructions(instrs: object[]): undefined {
 //         x
 //     }`)
 
-const test_VM = (code: string, expectedResult: any, testName?: string) => {
+const test_VM = (code: string, expectedResult: any, testName?: string, print_instrs?: boolean) => {
     console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
     console.log(`Code: ${code}`);
     
@@ -610,7 +610,8 @@ const test_VM = (code: string, expectedResult: any, testName?: string) => {
 
         const compiler = new RustCompiler();
         const instructions = compiler.compile(tree);
-        // printInstructions(instructions);
+
+        if (print_instrs) printInstructions(instructions);
     
         const VM = new RustVirtualMachine();
         const actualResult = VM.execute(instructions);
@@ -631,7 +632,11 @@ const test_VM = (code: string, expectedResult: any, testName?: string) => {
     }
 };
 
-// // Basic expressions
+// No main found
+test_VM(`fn not_main() -> string {}`, undefined, "No main found", true);
+test_VM(``, undefined, "Empty program", true);
+
+// Basic expressions
 test_VM("fn main() -> i32 { 1 }", 1);
 test_VM("fn main() -> i32 { 2 + 3 }", 5);
 test_VM("fn main() -> i32 { 1; 2; 3 }", 3);

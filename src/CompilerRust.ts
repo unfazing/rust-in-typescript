@@ -253,7 +253,7 @@ export class RustCompiler {
         wc = 0
         instrs = []
         ce = global_compile_environment
-        
+
         return this.visitor.visit(tree);
     }
 }
@@ -297,17 +297,22 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         ce.compile_time_environment_extend(new CompileTimeEnvFrame(locals))
         log(`ENVIRONMENT: ${ce}`, "CRATE")
         
+        let is_first = true;
         ctx.item().forEach(item => {
-
             log(`VISITING ITEM: ${item}`, "CRATE")
-            this.visit(item);            
+            if (is_first) {
+                is_first = false;
+            } else {
+                instrs[wc++] = { tag: "POP" } // pop Unit value from OS (due to evaluating assignments)
+            }
 
-            // pop the value of this item right after; we dont need it in global scope
-            instrs[wc++] = { tag: "POP" } 
+            this.visit(item);            
         });
 
         // call main() function if it exists
         if (ce.symbol_exist_in_compile_time_env("main")) {
+            instrs[wc++] = { tag: "POP" } // pop Unit value due to assignmnent of main
+
             instrs[wc++] = {
                 tag: "LD",
                 sym: "main",
@@ -317,7 +322,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             instrs[wc++] = { tag: "CALL", arity: 0 } // TODO: disallow main from taking in arguments
         }
 
-        instrs[wc++] = { tag: "EXIT_SCOPE" } // TODO: exit scope should not deallocate addr on OS
+        instrs[wc++] = { tag: "EXIT_SCOPE" } 
         instrs[wc] = { tag: "DONE" }
         ce.compile_time_environment_restore()
 
@@ -544,9 +549,6 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             tag: "ASSIGN", // immutable assign
             pos: ce.compile_time_environment_position(symbol),
         };
-
-        // assignment always have the unit type () in Rust!
-		instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; 
     }
 
     // KW_RETURN expression?
