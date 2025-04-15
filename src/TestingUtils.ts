@@ -48,21 +48,21 @@ export const test_typechecker = (code: string, expected_error: string, testName?
 
         // If we get here and expected_error is empty, test passes
         if (expected_error === "") {
-            console.log(`✅ Test Pass: ${code}`);
+            console.log(`✅ Test Pass. No error thrown.`);
         } else {
-            console.error(`❌ Test Fail: ${code}\nExpected error: "${expected_error}"\nBut no error was thrown\n`);
+            console.error(`❌ Test Fail: \nExpected error: "${expected_error}"\nBut no error was thrown\n`);
         }
 
     } catch (error) {
         // If we catch an error but expected no error, test fails
         if (expected_error === "") {
-            console.error(`❌ Test Fail: ${code}\nExpected no errors, but got:\n${error.message}\n`);
+            console.error(`❌ Test Fail: \nExpected no errors, but got:\n${error.message}\n`);
         } else if (error.message.includes(expected_error)) {
             // If we catch an error and it matches expected error, test passes
-            console.log(`✅ Test Pass: ${code}`);
+            console.log(`✅ Test Pass. Error thrown matches expected: \n${error.message}`);
         } else {
             // If we catch an error but it doesn't match expected error, test fails
-            console.error(`❌ Test Fail: ${code}\nExpected error: "${expected_error}"\nActual error: "${error.message}\n"`);
+            console.error(`❌ Test Fail: \nExpected error: "${expected_error}"\nActual error: "${error.message}\n"`);
         }
     } 
 };

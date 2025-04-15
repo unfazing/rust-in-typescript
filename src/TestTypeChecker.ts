@@ -1,18 +1,17 @@
-
 import { test_typechecker } from './TestingUtils.js';
 
 test_typechecker(`
-fn pass1() -> i32 {
+fn main() -> i32 {
     if (true) {
         6
     } else {
         7
     }
 }
-`, "")
+`, "", "Valid - If-Else Return")
 
 test_typechecker(`
-fn pass2() -> i32 {
+fn main() -> i32 {
     if (true) {
         6;
     } else {
@@ -20,34 +19,35 @@ fn pass2() -> i32 {
     }
     return 1;
 }
-`, "");
+`, "", "Valid - If-Else Statements");
 
 test_typechecker(`
-fn pass3() -> i32 {
-    if (true) {
-        return 6;
-    } else {
-        return 7;
+fn main() {
+    fn f() -> i32 {
+        if (true) {
+            return 6;
+        } else {
+            return 7;
+        }
+    }
+    fn f2() -> i32 {
+        let mut x: i32 = f();
+        x = f() + 1;
+        x = f() + f() + x;
+        let mut y: i32 = f() + f();
+        y = y + x;
+        let TEST: i32 = 100;
+        {
+            let z: i32 = TEST;
+        }
+        return y;
     }
 }
-
-fn pass3_1() -> i32 {
-    let mut x: i32 = pass3();
-    x = pass3() + 1;
-    x = pass3() + pass3() + x;
-    let mut y: i32 = pass3() + pass3();
-    y = y + x;
-    let TEST: i32 = 100;
-    {
-        let z: i32 = TEST;
-    }
-    return y;
-}
-`, "");
+`, "", "Valid - Function Calls and Assignments");
 
 test_typechecker(`
-fn pass4() -> i32 {
-    fn f8() -> bool {
+fn main() -> i32 {
+    fn main() -> bool {
         return false;
     }
     if (true) {
@@ -63,53 +63,53 @@ fn pass4() -> i32 {
     }
     return 111111;
 }
-`, "");
+`, "", "Valid - Nested If-Else Return");
 
 test_typechecker(`
-fn pass5() -> i32 {
+fn main() -> i32 {
     let mut x: i32 = if (true) { 6 } else { 7 };
     return x;
 }
-`, "");
+`, "", "Valid - If-Else Assignment");
 
 test_typechecker(`
-fn pass6() -> i32 {
+fn main() -> i32 {
     let mut y: i32 = return 6; // allow due to early termination
 }
-`, "");
+`, "", "Valid - Return in Assignment (Early Termination)");
 
 test_typechecker(`
-fn pass_ref_1() -> () {
+fn main() -> () {
     let x : i32 = 42;
     let x_ref : &i32 = &x;
     let x_ref_2 : &i32 = x_ref;
-    *x_ref_2; 
+    *x_ref_2;
 }
-`, "");
+`, "", "Valid - Immutable Reference Creation and Dereference");
 
 test_typechecker(`
-fn pass_deref_assign() {
+fn main() {
     let mut x: i32 = 42;
     let x_ref: &mut i32 = &mut x;
     *x_ref = 69;
     ((*x_ref)) = 69;
 }
-`, "");
+`, "", "Valid - Mutable Reference Dereference and Assignment");
 
 // Test cases for functions that should fail type checking
 test_typechecker(`
-fn fail1() -> i32 {
+fn main() -> i32 {
     if (true) {
         return 6;
     } else {
         7
     }
 }
-`, "Type error; Types of branches not matching; consequent type: retType<i32>, alternative type: i32");
+`, "Type error; Types of branches not matching; consequent type: retType<i32>, alternative type: i32", "Invalid - If-Else Branch Type Mismatch (Return vs Implicit Return)");
 
 // Mismatched branch types (unit vs return)
 test_typechecker(`
-fn fail2() -> i32 {
+fn main() -> i32 {
     if (true) {
         6;
     } else {
@@ -117,11 +117,11 @@ fn fail2() -> i32 {
     }
     return 1;
 }
-`, "Type error; Types of branches not matching; consequent type: (), alternative type: retType<i32>");
+`, "Type error; Types of branches not matching; consequent type: (), alternative type: retType<i32>", "Invalid - If-Else Branch Type Mismatch (Implicit Return vs Return)");
 
 // Return type mismatch (bool vs i32)
 test_typechecker(`
-fn fail3() -> i32 {
+fn main() -> i32 {
     if (true) {
         return false;
     } else {
@@ -129,11 +129,11 @@ fn fail3() -> i32 {
     }
     return 1;
 }
-`, "Type error in return statement; expected type: i32, actual type: bool");
+`, "Type error in return statement; expected type: i32, actual type: bool", "Invalid - Return Type Mismatch (Bool vs i32)");
 
 // Return type mismatch with implicit unit
 test_typechecker(`
-fn fail4() -> i32 {
+fn main() -> i32 {
     if (true) {
         return false
     } else {
@@ -141,130 +141,130 @@ fn fail4() -> i32 {
     }
     return 1;
 }
-`, "Type error in return statement; expected type: i32, actual type: bool");
+`, "Type error in return statement; expected type: i32, actual type: bool", "Invalid - Return Type Mismatch (Bool vs i32) - Implicit Else");
 
 // Use of moved reference
 test_typechecker(`
-fn fail_ref_1() -> () {
+fn main() -> () {
     let mut x : string = "2";
     let x_ref : &mut string = &mut x;
     let x_ref_2 : &mut string = x_ref;
     *x_ref;
 }
-`, "Type error in pathExpression; use of a moved value: x_ref");
+`, "Type error in pathExpression; use of a moved value: x_ref", "Invalid - Use of Moved Mutable Reference");
 
 // Immutable reference is not moved
 test_typechecker(`
-    fn pass_ref_1() -> () {
+    fn main() -> () {
         let x : string = "2";
         let x_ref : & string = & x;
         let x_ref_2 : & string = x_ref;
         *x_ref;
     }
-    `, "");
+    `, "", "Valid - Immutable Reference Creation and Dereference (String)");
 
 // Assignment to immutable reference
 test_typechecker(`
-fn fail_deref_assign() {
+fn main() {
     let mut x: i32 = 42;
     let x_ref: &i32 = &x;
     *x_ref = 69;
     ((*x_ref)) = 69;
 }
-`, "Type error in assignment; cannot assign to a dereference of an immutable reference");
+`, "Type error in assignment; cannot assign to a dereference of an immutable reference", "Invalid - Assignment to Immutable Reference");
 
 
 test_typechecker(`
-fn fail_lookup_scope() {
+fn main() {
     let x: i32 = 42;
 
-    fn funky() -> i32 {
+    fn main() -> i32 {
         return x; // cannot access dynamic variable outside of fn scope
     }
 
-    funky();
+    main();
 }
-`, "Type error in pathExpression; [lookup_type] Variable x is from an outer scope.")
+`, "Type error in pathExpression; [lookup_type] Variable x is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
 
 test_typechecker(`
-fn pass_lookup_scope() {
+fn main() {
     let x: i32 = 42;
 
-    fn filthy() {}
+    fn main() {}
 
-    fn funky() {
-        filthy(); // can access function names outside of scope
+    fn main() {
+        main(); // can access function names outside of scope
     }
 
-    funky();
+    main();
 }
-`, "")
+`, "", "Valid - Lookup Function Name From Outer Scope")
 
 test_typechecker(`
-fn pass_create_borrow_using_deref() {
+fn main() {
     let x: i32 = 42;
     let x_ref: &i32 = &x;
-    let x_ref_2: &i32 = &(*x_ref); 
+    let x_ref_2: &i32 = &(*x_ref);
 }
-`, "")
+`, "", "Valid - Borrow from Dereferenced Immutable Reference")
 
 test_typechecker(`
-fn pass_create_immutable_borrow_to_temp_var() {
+fn main() {
     let x_ref: &i32 = &42;
     let x_ref_2: &i32 = &(*x_ref); // allowed in Rust
 }
-`, "")
+`, "", "Valid - Immutable Borrow to Temporary Variable")
 
 test_typechecker(`
-fn fail_create_mutable_borrow_to_temp_var() {
+fn main() {
     let x_ref: &i32 = &42;
     let x_ref_2: &mut i32 = &mut (*x_ref); // another immutable borrow alr exists, throw error
 
     // mfking Rust allows this due to some reborrowing bs (https://haibane-tenshi.github.io/rust-reborrowing/)
 }
-`, "cannot create a mutable borrow because owner already has an immutable borrow") 
+`, "cannot create a mutable borrow because owner already has an immutable borrow", "Invalid - Mutable Borrow to Temporary Variable (Immutable Borrow Exists)")
 
 test_typechecker(`
-fn pass_deref_then_assign_to_temp_var() {
+fn main() {
     let x_ref: &mut i32 = &mut 42; // notice temp 42 is not mutable
     *x_ref = 69;
 }
-`, "") 
+`, "", "Valid - Dereference Mutable Borrow and Assign to Temporary")
 
 
 test_typechecker(`
-fn pass_compare_i32() {
-    let x: i32 = 2; 
+fn main() {
+    let x: i32 = 2;
     let y: i32 = 1;
     x < y;
 }
-`, "") 
+`, "", "Valid - Compare i32")
 
 test_typechecker(`
-fn pass_compare_i32_with_f64() {
-    let x: i32 = 2; 
+fn main() {
+    let x: i32 = 2;
     let y: f64 = 1.5;
     (x > y) || (y < x);
 }
-`, "") 
+`, "", "Valid - Compare i32 with f64")
 
 test_typechecker(`
-fn pass_compare_i32_with_f64_raw() {
-    let x: i32 = 2; 
+fn main() {
+    let x: i32 = 2;
     x <= 9.99;
 }
-`, "") 
+`, "", "Valid - Compare i32 with f64 (Raw)")
 
 test_typechecker(`
-fn fail_compare_i32_with_bool_or_char() {
-    let x: i32 = 2; 
+fn main() {
+    let x: i32 = 2;
     x < true && x >= 'a';
 }
-`, "Type error in comparison expression") 
+`, "Type error in comparison expression", "Invalid - Compare i32 with Bool or Char")
 
 
 test_typechecker(`
-    fn pass_nested_borrows() {
+    fn main() {
         let mut x: string = "123";
         {
             {
@@ -274,152 +274,152 @@ test_typechecker(`
         }
         let x_ref_3: &mut string = &mut x;
     }
-    `, "") 
+    `, "", "Valid - Nested Mutable Borrows")
 
 test_typechecker(`
-    fn pass_function_ref_param() {
-        fn test(a: &mut string) -> &mut string {
+    fn main() {
+        fn main(a: &mut string) -> &mut string {
             return a;
-        }        
+        }
     }
-    `, "") 
+    `, "", "Valid - Function with Mutable Reference Parameter and Return")
 
 
 test_typechecker(`
-    fn fail_fn_no_return_ref() {
-        fn test(a: &mut string) -> &mut string {
-            let new_ref: &mut string = &mut"123";
+    fn main() {
+        fn main(a: &mut string) -> &mut string {
+            let new_ref: &mut string = &mut\"123\";
             return new_ref;
         }
     }
-    `, "Type error in function declaration; Function returns a locally declared reference.") 
+    `, "Type error in function declaration; Function returns a locally declared reference.", "Invalid - Function Returning Reference to Local Variable")
 
 
 test_typechecker(`
-    fn fail_fn_too_many_ref_param() {
-        fn test(a: &mut string, b: &mut string) -> &mut string {
+    fn main() {
+        fn main(a: &mut string, b: &mut string) -> &mut string {
             return a;
         }
     }
-    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.") 
+    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Function with Multiple Mutable Reference Parameters")
 
 test_typechecker(`
-    fn pass_ref_inner_type_consistent() {
-        fn test(a: &mut string) {
+    fn main() {
+        fn main(a: &mut string) {
             return;
-        }        
+        }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        test(x_ref); // move x_ref into function
+        main(x_ref); // move x_ref into function
         let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
     }
-    `, "")
+    `, "", "Valid - Re-borrow After Mutable Borrow Ends")
 
 
 test_typechecker(`
-    fn fail_ref_inner_type_consistent() {
-        fn test(a: &mut string) -> &mut string {
+    fn main() {
+        fn main(a: &mut string) -> &mut string {
             return a;
-        }        
+        }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        test(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
-        let mut x_ref_2: &mut string = &mut x; 
+        main(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
+        let mut x_ref_2: &mut string = &mut x;
     }
-    `, "Type error in pathExpression; use (read/write) of a mutably borrowed value")
-        
+    `, "Type error in pathExpression; use (read/write) of a mutably borrowed value", "Invalid - Simultaneous Mutable Borrows")
+
 
 test_typechecker(`
-    fn fail_move_ref_in_fn_reassign() {
-        fn test(a: &mut string) -> &mut string {
+    fn main() {
+        fn main(a: &mut string) -> &mut string {
             return a;
-        }        
+        }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        x_ref = test(x_ref); // cannot assign to moved value
+        x_ref = main(x_ref); // cannot assign to moved value
     }
-    `, "Type error in assignment; Cannot assign to a moved value.")
+    `, "Type error in assignment; Cannot assign to a moved value.", "Invalid - Reassigning Moved Mutable Reference")
 
 test_typechecker(`
-    fn fail_move_ref_in_fn() {
-        fn test(a: &mut string) -> &mut string {
+    fn main() {
+        fn main(a: &mut string) -> &mut string {
             return a;
-        }        
+        }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        test(x_ref); // move x_ref
+        main(x_ref); // move x_ref
         x_ref = &mut "test"; // use moved value
     }
-    `, "Type error in pathExpression; use of a moved value")
+    `, "Type error in pathExpression; use of a moved value", "Invalid - Use of Moved Mutable Reference After Function Call")
 
 
 test_typechecker(`
-    fn pass_no_move_immutable_ref() {
-        fn test(a: & string) -> & string {
+    fn main() {
+        fn main(a: & string) -> & string {
             return a;
-        }        
+        }
         let x: string = "123";
         let x_ref: & string = & x;
-        test(x_ref); // no move x_ref since immutable ref
-        test(x_ref);
+        main(x_ref); // no move x_ref since immutable ref
+        main(x_ref);
     }
-    `, "")
+    `, "", "Valid - Passing Immutable Reference")
 
 test_typechecker(`
-    fn pass_higher_order_fn() {
+    fn main() {
         fn apply_function(func: fn(i32) -> i32, value: i32) -> i32 {
             func(value) + value
         }
 
-        fn double(x: i32) -> i32 {
+        fn main(x: i32) -> i32 {
             x * 2
         }
-        let result: i32 = apply_function(double, 5);
+        let result: i32 = apply_function(main, 5);
     }
-    `, "")
+    `, "", "Valid - Higher-Order Function (i32)")
 
 test_typechecker(`
-    fn pass_higher_order_fn_with_refs() {
+    fn main() {
         fn apply_function(func: fn(& i32) -> i32, value: & i32) -> i32 {
             func(value) + *value
         }
 
-        fn double(x: &i32) -> i32 {
+        fn main(x: &i32) -> i32 {
             *x * 2
         }
-        let result: i32 = apply_function(double, &5);
+        let result: i32 = apply_function(main, &5);
     }
-    `, "")
+    `, "", "Valid - Higher-Order Function with References")
 
 test_typechecker(`
-    fn fail_closure_check_bare_fn() {
+    fn main() {
         // function cant take in more than one ref if return ref
         fn apply_function(func: fn(&i32, &i32) -> &i32) {}
     }
-    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.")
+    `, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Higher-Order Function with Multiple Reference Arguments")
 
 test_typechecker(`
-    fn fail_closure_check_ret_type_bare_fn() {
+    fn main() {
         fn apply_function(func: fn(&i32) -> &mut i32) {}
     }
-    `, "Type error in ClosureType construction; Returned ref must have same type as argument ref.")
+    `, "Type error in ClosureType construction; Returned ref must have same type as argument ref.", "Invalid - Higher-Order Function with Mismatched Reference Types")
 
 
 test_typechecker(`
-    fn fail_lookup_unbound_var() {
+    fn main() {
         abc = 10;
     }
-    `, "Type error in pathExpression; [lookup_type] Unbound variable abc.")
+    `, "Type error in pathExpression; [lookup_type] Unbound variable abc.", "Invalid - Assigning to Unbound Variable")
 
 test_typechecker(`
-    fn fail_deref_non_ref_type() {
+    fn main() {
         let x: i32 = 123;
         *x;
     }
-    `, "Type error; dereferencing a non-reference type: i32")
-        
+    `, "Type error; dereferencing a non-reference type: i32", "Invalid - Dereferencing Non-Reference Type")
+
 test_typechecker(`
-    fn fail_dangling_ref() {
+    fn main() {
         let mut x: &mut i32 = &mut 5;
         {
             let mut y: i32 = 2;
@@ -427,21 +427,21 @@ test_typechecker(`
         }
         let mut z: i32 = *x;
     }
-    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.", "Invalid - Dangling Mutable Reference (Local Scope)")
 
 test_typechecker(`
-    fn fail_dangling_ref_temp_var() {
+    fn main() {
         let mut x: &mut i32 = &mut 5;
         {
             x = &mut 7;
         }
         let mut z: i32 = *x;
     }
-    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.", "Invalid - Dangling Mutable Reference (Temporary Value in Scope)")
 
 
 test_typechecker(`
-    fn fail_dangling_ref_temp_var_2() {
+    fn main() {
         let mut x: &mut i32 = &mut 5;
         {
             let y: &i32 = &123;
@@ -449,15 +449,14 @@ test_typechecker(`
         }
         let mut z: i32 = *x;
     }
-    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.")
+    `, "Type error in assignment; Lifetime of locally assigned reference shorter than variable x.", "Invalid - Dangling Mutable Reference (Temporary Value Derived from Dereference in Scope)")
 
 
 test_typechecker(`
-    fn pass_no_dangling_ref_assignment() {
+    fn main() {
         let mut x: &mut i32 = &mut 5;
         let y: &i32 = &123;
         x = &mut (7 + *y);
         let mut z: i32 = *x;
     }
-    `, "")
-
+    `, "", "Valid - No Dangling Mutable Reference (Temporary Value Outside Scope)")
