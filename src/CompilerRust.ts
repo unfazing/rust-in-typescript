@@ -484,27 +484,27 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     }
 
     getSymbolFromExpression(expr_ctx: ExpressionContext): string {
-            while (expr_ctx instanceof GroupedExpressionContext) {
-                expr_ctx = expr_ctx.expression()
-            }
-    
-            if (expr_ctx instanceof BorrowExpressionContext) {
-                expr_ctx = expr_ctx.expression()
-            }
-
-            if (expr_ctx instanceof DereferenceExpressionContext) {
-                expr_ctx = expr_ctx.expression()
-            }
-    
-            while (expr_ctx instanceof GroupedExpressionContext) {
-                expr_ctx = expr_ctx.expression()
-            }
-    
-            if (expr_ctx instanceof PathExpression_Context) {
-                return this.visit(expr_ctx.pathExpression().getChild(0))
-            }
-            throw new Error("Compiler Error in Assignment: COULD NOT FIND PATH EXPRESSION TO RETRIEVE SYMBOL")
+        while (expr_ctx instanceof GroupedExpressionContext) {
+            expr_ctx = expr_ctx.expression()
         }
+
+        if (expr_ctx instanceof BorrowExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        if (expr_ctx instanceof DereferenceExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        while (expr_ctx instanceof GroupedExpressionContext) {
+            expr_ctx = expr_ctx.expression()
+        }
+
+        if (expr_ctx instanceof PathExpression_Context) {
+            return this.visit(expr_ctx.pathExpression().getChild(0))
+        }
+        throw new Error("Compiler Error in Assignment: COULD NOT FIND PATH EXPRESSION TO RETRIEVE SYMBOL")
+    }
     
 
     // expression EQ expression
@@ -516,39 +516,34 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         let expr = this.visit(RHS) 
 
         let LHS: ExpressionContext = ctx.expression(0);
-        // while (LHS instanceof GroupedExpressionContext) {
-        //     LHS = LHS.expression()
-        // }
+        while (LHS instanceof GroupedExpressionContext) {
+            LHS = LHS.expression()
+        }
         
-        // if (LHS instanceof DereferenceExpressionContext) {
-        //     LHS = LHS.expression()
-        //     this.visit(LHS) // add LHS derefed addr to OS
-        // } else {
-        //     instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; 
-        // }
-        let symbol = this.getSymbolFromExpression(LHS) // visit children of pathExpression to avoid adding LD instr
+        if (LHS instanceof DereferenceExpressionContext) {
+            log(`ASSIGNING A DEREF: ${LHS.getText()}`, "ASSIGNMENT_EXPRESSION")
 
-        // if (LHS instanceof DereferenceExpressionContext) {
-        //     log(`ASSIGNING A DEREF: ${LHS.getText()}`, "ASSIGNMENT_EXPRESSION")
+            // dereference the LHS
+            this.visit(LHS);
 
-        //     // push the address of the reference node on the OS
-        //     this.visit(LHS.expression())
+            // do a deref assignment
+            instrs[wc++] = {
+                tag: "ASSIGN_DEREF", 
+            };
 
-        //     // do a deref assignment
-        //     instrs[wc++] = {
-        //         tag: "ASSIGN_FROM_DEREF", // immutable assign
-        //     };
+        } else if (LHS instanceof PathExpression_Context) {
+            let symbol = this.getSymbolFromExpression(LHS) // visit children of pathExpression to avoid adding LD instr
+            log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
 
-        //     return; // terminate early
-        // }
+            log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
+            instrs[wc++] = {
+                tag: "ASSIGN", // immutable assign
+                pos: ce.compile_time_environment_position(symbol),
+            };
         
-        log(`SYMBOL: ${symbol}`, "ASSIGNMENT_EXPRESSION")
-        
-        log(`EXPR: ${expr}`, "ASSIGNMENT_EXPRESSION")
-        instrs[wc++] = {
-            tag: "ASSIGN", // immutable assign
-            pos: ce.compile_time_environment_position(symbol),
-        };
+        } else {
+            throw new Error("Compilation error in Assignment; LHS does not support assignment")
+        }
     }
 
     // KW_RETURN expression?

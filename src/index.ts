@@ -795,6 +795,13 @@ test_VM(
     "abcxyz", "Concat strings"
 );
 
+test_VM(`
+    fn main() -> String {
+        let mut x: String = "foo";
+        x = "bar";
+        x
+    }`, "bar", "String: reassignment to new string");
+
 test_VM(
     `
     fn main() -> string {
@@ -852,25 +859,136 @@ test_VM(`
     "xyz", "Update string pool"
 )
 
-// test_VM(`
-//     fn main() -> i32 {
-//         let x = 42;
-//         let p = &x;
-//         *p
-//     }`, 42, "i32: basic reference and dereference");
+test_VM(`
+    fn main() -> i32 {
+        let x = 42;
+        let p = &x;
+        *p
+    }`, 42, "i32: basic reference and dereference");
         
-// test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 10;
-//         let p = &mut x;
-//         // *p = 5;
-//         x
-//     }`, 5, "i32: mut reference write-through");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 10;
+        let p = &mut x;
+        *p = 5;
+        x
+    }`, 5, "i32: mut reference write-through");
         
-// test_VM(`
-//     fn main() -> i32 {
-//         let mut x = 1;
-//         let p = &mut x;
-//         *p = *p + 1;
-//         x
-//     }`, 2, "i32: mutate through reference");
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 1;
+        let p = &mut x;
+        *p = *p + 1;
+        x
+    }`, 2, "i32: mutate through reference");
+
+test_VM(`
+    fn main() -> i32 {
+        let x = 100;
+        let r = &x;
+        {
+            let y = *r;
+            y
+        }
+    }`, 100, "i32: immutably dereferenced in inner block");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 5;
+        let mut y = 10;
+        let mut p = &mut x;
+        *p = 1;
+        p = &mut y;
+        *p = 2;
+        x + y
+    }`, 3, "i32: reassign mutable reference");
+    
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 7;
+        let p = &mut x;
+        let pp = &p;
+        **pp
+    }`, 7, "i32: double mutable reference (safe read)");
+    
+test_VM(`
+    fn get_ref(x: &i32) -> i32 {
+        *x
+    }
+    fn main() -> i32 {
+        let x = 99;
+        get_ref(&x)
+    }`, 99, "i32: dereference ref passed to function");
+    
+test_VM(`
+    fn set_ref(x: &mut i32) {
+        *x = 123;
+    }
+    fn main() -> i32 {
+        let mut a = 0;
+        set_ref(&mut a);
+        a
+    }`, 123, "i32: mutate via &mut passed to function");
+    
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 1;
+        {
+            let p = &mut x;
+            *p = *p + 10;
+        }
+        x
+    }`, 11, "i32: mutate in nested block");
+    
+test_VM(`
+    fn main() -> i32 {
+        let mut x = 3;
+        let p = &mut x;
+        *p = *p * 2;
+        x
+    }`, 6, "i32: assign based on current value through ref");
+    
+test_VM(`
+    fn main() -> String {
+        let x: String = "abc";
+        let r = &x;
+        *r
+    }`, "abc", "String: immutable reference and dereference");
+
+test_VM(`
+    fn main() -> String {
+        let mut x: String = "start";
+        let p = &mut x;
+        *p = "end";
+        x
+    }`, "end", "String: mutate via &mut dereference");
+        
+test_VM(`
+    fn main() -> String {
+        let mut x: String = "a";
+        {
+            let r = &mut x;
+            *r = "b";
+        }
+        x
+    }`, "b", "String: nested mut ref assignment");
+
+test_VM(`
+    fn echo(s: String) -> String {
+        s
+    }
+
+    fn main() -> String {
+        echo("echoed")
+    }`, "echoed", "String: passed and returned from function");
+
+test_VM(`
+    fn update(s: &mut String) {
+        *s = "new";
+    }
+
+    fn main() -> String {
+        let mut s: String = "old";
+        update(&mut s);
+        s
+    }`, "new", "String: mutate through &mut in function");

@@ -747,7 +747,11 @@ class Heap {
 		// console.log(`[freeMem] Freed Memory of ${address} Tag: ${tagMap[(HEAP.getTag(address))]}`)
 		this.set(address, this.free)
 		this.free = address
-		
+
+		// update stringPool if this node is a string
+		if (HEAP.getTag(address) === String_tag) {
+
+		}
 	}
 
 	// freeMemOnExitScope() {
@@ -1596,34 +1600,55 @@ const microcode = {
 		push(OS, STACK.UNIT)
 
 	},
-	// ASSIGN_DEREF: (instr) => {
-	// 	// eg. *x = y;
-	// 	// at this point, the 2 top most values on OS are: OS = [address of y, address of x (a reference node)]
-	// 	const ref_address = OS.pop();
-	// 	if (!STACK.is_Reference(ref_address)) {
-	// 		throw new Error("Dereferencing a non-reference value");
-	// 	}
-
-	// 	const LHS_address = STACK.get_Reference_target(ref_address);
-	// 	const RHS_address = OS.pop()
-
-	// 	// At this point, the typechecker should have validated that 
-	// 	// the target is of the same type as the assignee
-	// 	if (is_stack_address(LHS_address) !== is_stack_address(RHS_address)) {
-	// 		throw new Error("Assignment of different types!" +
-	// 			"A primitive type is assigned to a referenced type or vice versa");
-	// 	}
+	ASSIGN_DEREF: (instr) => {
+		// eg. *x = y;
+		// at this point, the 2 top most values on OS are: OS = [address of y, address of *x (the target address)]
 		
-	// 	if (is_stack_address(LHS_address)) {
+		const LHS_address = OS.pop()
+		const RHS_address = OS.pop()
 
-	// 		STACK.shallow_copy(LHS_address, RHS_address);
-			
-	// 	} else {
-	// 		HEAP.
-	// 	}
+		// The typechecker should have validated that 
+		// the target is of the same type as the assignee
+		if (STACK.get_tag(LHS_address) !== STACK.get_tag(RHS_address)) {
+			throw new Error("Cannot assign non-matching type.")
+		}
 
+		// Proceed with normal assignment
 
-	// },
+		// Implementing COPY trait
+
+		if (STACK.is_Unassigned(LHS_address)) {
+			// LHS variable is unassigned (after a block scan)
+			// we initialize a new address to the variable now.
+
+			// create a copy in the current stack frame
+			//
+			// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
+			// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
+			const copy_addr = STACK.create_copy(RHS_address);
+
+			// set the heap address to that copy
+			HEAP.setEnvValue(E, instr.pos, copy_addr) 
+
+		} else {
+
+			// this means the variable was already initialized. 
+			// We should perform shallow copy from RHS to LHS, since 
+			// RHS value may go out of scope.
+			STACK.shallow_copy(LHS_address, RHS_address);
+		}
+
+		if (STACK.is_heap_allocated_type(RHS_address)) {
+
+			// Implementing MOVE trait
+			STACK.mark_moved(RHS_address);			
+		}
+
+		// finally, push unit value on OS, 
+		// because an assignment expression 
+		// always has Unit value in Rust
+		push(OS, STACK.UNIT)
+	},
 	LDF: (instr) => {
 		const closure_address = STACK.allocate_Closure(instr.arity, instr.addr, E);
 		push(OS, closure_address);
@@ -1786,7 +1811,7 @@ function run(instrs) {
 			HEAP.freeMem(STACK.get_heap_allocated_address(value_addr))
 		}
 	}
-	
+
 	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
 	console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
 	if (HEAP.n_nodes_used > 0) {
