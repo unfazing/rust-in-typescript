@@ -102,17 +102,17 @@ class Stack {
 	private FP: number;				// Frame Pointer: points to the start of the current frame
 
 	// Canonical values = SINGLETONS
-	public TRUE: number;
-	public FALSE: number;
-	public UNIT: number;
+	// public TRUE: number;
+	// public FALSE: number;
+	// public UNIT: number;
 	public UNASSIGNED: number;
 
 	constructor(bytes: number, starting_address: number) {
 		if (bytes % word_size !== 0) 
-			error(`Stack size must be divisible by ${word_size}`);
+			error(`Runtime Error; [STACK::constructor] Stack size must be divisible by ${word_size}`);
 
 		if (starting_address % word_size !== 0) 
-			error(`Starting address of stack must be divisible by ${word_size}`)
+			error(`Runtime Error; [STACK::constructor] Starting address of stack must be divisible by ${word_size}`)
 
 		const data = new ArrayBuffer(bytes);
 		const view = new DataView(data);
@@ -133,9 +133,9 @@ class Stack {
 	init_Canonicals() {
 		// boolean values carry their value (0 for false, 1 for true)
 		// in the byte following the tag
-		this.FALSE = STACK.allocate_False();
-		this.TRUE = STACK.allocate_True();
-		this.UNIT = STACK.allocate_Unit();
+		// this.FALSE = STACK.allocate_False();
+		// this.TRUE = STACK.allocate_True();
+		// this.UNIT = STACK.allocate_Unit();
 		this.UNASSIGNED = STACK.allocated_Unassigned()
 	}
 
@@ -219,11 +219,11 @@ class Stack {
 	 */
 	shallow_copy(destination_addr: number, target_addr: number) {
 		if (this.is_out_of_range(destination_addr)) {
-			throw new Error("destination_addr is out of range. Is it really a stack address?")
+			throw new Error("Runtime Error; [STACK::shallow_copy] destination_addr is out of range. Is it really a stack address?")
 		}
 
 		if (this.is_out_of_range(target_addr)) {
-			throw new Error("target_addr is out of range. Is it really a stack address?")
+			throw new Error("Runtime Error; [STACK::shallow_copy] target_addr is out of range. Is it really a stack address?")
 		}
 		
 		const target_size: number = this.get_size(target_addr);
@@ -231,7 +231,7 @@ class Stack {
 
 		// this should be handled by the Typechecker! Cannot assign a different type to a variable
 		if (dest_size !== target_size) {
-			throw new Error("Cannot copy more or fewer words than the size of the destination node.")
+			throw new Error("Runtime Error; [STACK::shallow_copy] Cannot copy more or fewer words than the size of the destination node.")
 		}
 
 		// copy words as raw 64-bit chunks
@@ -269,7 +269,7 @@ class Stack {
 		this.SP += size;
 
 		if (this.is_out_of_range(this.SP)) {
-			throw new Error("Stack out of space")
+			throw new Error("Runtime Error; [STACK::allocate] Stack out of space")
 		}
 
 		const virtual_address = this.convert_to_virtual_addr(address);
@@ -392,7 +392,7 @@ class Stack {
         return this.get_tag(address) === Unit_tag;
     }
 
-	allocated_Unassigned() {
+	private allocated_Unassigned() {
         return this.allocate(Unassigned_tag, 1);
 	}
 	
@@ -571,7 +571,7 @@ class Stack {
 
 		// sanity check
 		if (!this.is_Callframe()) {
-			throw new Error("FP is not pointed to a call frame.")
+			throw new Error("Runtime Error; [STACK::pop_Callframe] FP is not pointed to a call frame.")
 		}
 
 		this.free_heap_allocated_memory();
@@ -621,7 +621,7 @@ class Stack {
 	pop_Blockframe() {
 		// sanity check
 		if (!this.is_Blockframe()) {
-			throw new Error("FP is not pointed to a block frame.")
+			throw new Error("Runtime Error; [STACK::pop_Blockframe] FP is not pointed to a block frame.")
 		}
 
 		this.free_heap_allocated_memory();
@@ -692,7 +692,7 @@ class Stack {
 
 	mark_moved(address: number): void {
 		if (!this.is_heap_allocated_type(address)) {
-			throw new Error("Trying to move a non-referenced type.")
+			throw new Error("Runtime Error; [STACK::mark_moved] Trying to move a non-referenced type.")
 		}
 
 		this.set_byte_at_offset(address, 7, 1); // 1 == moved
@@ -721,7 +721,7 @@ class Heap {
 	private environementStack = []
 
 	constructor(heap_size_bytes: number) {
-		if (heap_size_bytes % (word_size * node_size) !== 0) throw new Error("heap bytes must be divisible by word size * node size");
+		if (heap_size_bytes % (word_size * node_size) !== 0) throw new Error("Runtime Error; [HEAP::constructor] heap bytes must be divisible by word size * node size");
 		this.heap = new DataView(new ArrayBuffer(heap_size_bytes));
 
 		// set up linked list of free nodes
@@ -735,51 +735,55 @@ class Heap {
 	freeMem(address: number) {
 		// sanity check
 		if (is_stack_address(address)) {
-			throw new Error("[HEAP::freeMem] Trying to free stack allocated memory address")
+			throw new Error("Runtime Error; [HEAP::freeMem] Trying to free stack allocated memory address")
 		}
 
 		if (!tagMap[HEAP.getTag(address)]) {
-			throw new Error("[HEAP::freeMem] Trying to free memory that is already freed")
+			throw new Error("Runtime Error; [HEAP::freeMem] Trying to free memory that is already freed")
 		}
-
-		this.n_nodes_used--
-		this.n_nodes_freed++
+		
 		// console.log(`[freeMem] Freed Memory of ${address} Tag: ${tagMap[(HEAP.getTag(address))]}`)
-		this.set(address, this.free)
-		this.free = address
-
-		// update stringPool if this node is a string
-		if (HEAP.getTag(address) === String_tag) {
-
+		
+		// Leave string heap nodes to free at the end of programme execution
+		if (HEAP.getTag(address) !== String_tag) {
+			this.n_nodes_used--
+			this.n_nodes_freed++
+			this.set(address, this.free)
+			this.free = address
 		}
 	}
 
-	// freeMemOnExitScope() {
-	// 	const alloced_addresses: number[] = this.allocatedAddresses.pop()
-	// 	// console.log(`[freeMemOnExitScope] ${JSON.stringify(alloced_addresses)}`)
-	// 	// console.log(`[freeMemOnExitScope] ${JSON.stringify(this.allocatedAddresses)}`)
-	// 	for (const addr of alloced_addresses) {
-	// 		if (!this.hasOwner(addr)) {
-	// 			if (STACK.is_heap_allocated_type(peek(OS, 0)) && STACK.get_String_Heap_addr(peek(OS, 0)) == addr) {
-	// 				// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr is the result on the OS. Tag: ${tagMap[HEAP.getTag(addr)]} `)
-	// 				continue // don't free heap allocated val if it is the final value on the OS
-	// 			}
-	// 			// console.log(`[freeMemOnExitScope] Addr ${peek(OS, 0)}, TAG: ${tagMap[STACK.get_tag(peek(OS, 0))]}, heap addr: ${STACK.get_String_Heap_addr(peek(OS, 0))}  is the stack addr on the OS} `)
+	freeStringMem(address: number) {
+		// sanity check
+		if (is_stack_address(address)) {
+			throw new Error("Runtime Error; [HEAP::freeStringMem] Address is not a heap node!")
+		}
 
-	// 			this.freeMem(addr)		
-	// 		} else {
-	// 			// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr has owner. Tag: ${tagMap[HEAP.getTag(addr)]} `)
-	// 		}
-	// 	}
-	// }
+		if (tagMap[HEAP.getTag(address)] != "String") {
+			throw new Error("Runtime Error; [HEAP::freeStringMem] Address is not a String node!")
+		}
+		
+		// console.log(`[freeMem] Freed Memory of ${address} Tag: ${tagMap[(HEAP.getTag(address))]}`)
+		
+		this.n_nodes_used--
+		this.n_nodes_freed++
+		this.set(address, this.free)
+		this.free = address
+	}
+
+	freeStringPool() {
+		for (const pool of Object.values(this.stringPool)) {
+			pool.forEach(entry => this.freeStringMem(entry.address))
+		}
+	}
 
 	allocate(tag: number, size: number): number {
 		if (size > node_size) {
-            throw new Error("limitation: nodes cannot be larger than 10 words")
+            throw new Error("Runtime Error; [HEAP::allocate] Limitation: nodes cannot be larger than 10 words")
         }
 
 		if (this.free == -1) {
-			throw new Error("Heap memory exhausted")
+			throw new Error("Runtime Error; [HEAP::allocate] Heap memory exhausted")
 		}
 		this.n_nodes_used++
 		const address = this.free;
@@ -1288,7 +1292,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 	let value: RustValue | undefined;
 
 	if (STACK.is_Unassigned(address)) {
-		throw new Error("Access of uninitialize variable.");
+		throw new Error("Runtime Error; [address_to_Rust_value] Access of uninitialized variable.");
 	}
 
 	if (STACK.is_False(address)) {
@@ -1343,7 +1347,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 const Rust_value_to_address = (x: RustValue): number => {
 
 	if (x instanceof BooleanRustValue) {
-		return x.val ? STACK.TRUE : STACK.FALSE;
+		return x.val ? STACK.allocate_True() : STACK.allocate_False();
 	}
 
 	if (x instanceof I32RustValue) {
@@ -1359,7 +1363,7 @@ const Rust_value_to_address = (x: RustValue): number => {
 	}
 
 	if (x instanceof UnitRustValue) {
-		return STACK.UNIT;
+		return STACK.allocate_Unit();
 	}
 
 	if (x instanceof StringRustValue) {
@@ -1560,6 +1564,7 @@ const microcode = {
 
 		const RHS_address = OS.pop();
 		const LHS_address = HEAP.getEnvValue(E, instr.pos);
+		const lhs_tag = STACK.get_tag(LHS_address)
 
 		if (!is_stack_address(LHS_address) || !is_stack_address(RHS_address)) {
 			throw new Error("Assignment must be done on the stack, never the heap")
@@ -1605,7 +1610,7 @@ const microcode = {
 		// finally, push unit value on OS, 
 		// because an assignment expression 
 		// always has Unit value in Rust
-		push(OS, STACK.UNIT)
+		push(OS, STACK.allocate_Unit())
 
 	},
 	ASSIGN_DEREF: (instr) => {
@@ -1617,9 +1622,9 @@ const microcode = {
 
 		// The typechecker should have validated that 
 		// the target is of the same type as the assignee
-		if (STACK.get_tag(LHS_address) !== STACK.get_tag(RHS_address)) {
-			throw new Error("Cannot assign non-matching type.")
-		}
+		// if (STACK.get_tag(LHS_address) !== STACK.get_tag(RHS_address)) { // this check would catch when LHS is False, RHS is True.
+		// 	throw new Error(`Runtime Error; [instr: ASSIGN_DEREF] Cannot assign non-matching type - LHS: ${tagMap[STACK.get_tag(LHS_address)]}, RHS: ${tagMap[STACK.get_tag(RHS_address)]}.`)
+		// }
 
 		// Proceed with normal assignment
 
@@ -1663,7 +1668,7 @@ const microcode = {
 		// finally, push unit value on OS, 
 		// because an assignment expression 
 		// always has Unit value in Rust
-		push(OS, STACK.UNIT)
+		push(OS, STACK.allocate_Unit())
 	},
 	LDF: (instr) => {
 		const closure_address = STACK.allocate_Closure(instr.arity, instr.addr, E);
@@ -1726,7 +1731,7 @@ const microcode = {
 		const reference_address = OS.pop();
 
 		if (!STACK.is_Reference(reference_address)) {
-			throw new Error("Dereferencing non-reference types");
+			throw new Error("Runtime Error; [instr:DEREF] Dereferencing non-reference types");
 		}
 
 		push(OS, STACK.get_Reference_target(reference_address));
@@ -1827,6 +1832,8 @@ function run(instrs) {
 			HEAP.freeMem(STACK.get_heap_allocated_address(value_addr))
 		}
 	}
+
+	HEAP.freeStringPool()
 
 	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
 	console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
