@@ -1,27 +1,27 @@
 import { test_VM } from './TestingUtils.js';
 
 // No main found
-test_VM(`fn not_main() -> string {}`, undefined, "No main found", true);
-test_VM(``, undefined, "Empty program", true);
+test_VM(`fn not_main() -> string {}`, undefined, "VM - No Main Function", true);
+test_VM(``, undefined, "VM - Empty Program", true);
 
 // Basic expressions
-test_VM("fn main() -> i32 { 1 }", 1);
-test_VM("fn main() -> i32 { 2 + 3 }", 5);
-test_VM("fn main() -> i32 { 1; 2; 3 }", 3);
-test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3);
-test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3);
+test_VM("fn main() -> i32 { 1 }", 1, "VM - Basic - Integer Literal");
+test_VM("fn main() -> i32 { 2 + 3 }", 5, "VM - Basic - Integer Addition");
+test_VM("fn main() -> i32 { 1; 2; 3 }", 3, "VM - Basic - Expression Sequence");
+test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3, "VM - Basic - If-Else (False Condition)");
+test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3, "VM - Basic - If-Else (True Condition) with Preceding Expression");
 
 // Blocks and variables
 test_VM(
     `
     fn main() -> i32 {
-        let y = 4; 
+        let y = 4;
         {
-            let x = y + 7; 
+            let x = y + 7;
             x * 2
         }
     }
-    `, 22,
+    `, 22, "VM - Scope - Block and Variable Shadowing",
 );
 
 // Functions
@@ -29,21 +29,21 @@ test_VM(
     `
     fn f() -> i32 { 1 }
     fn main() -> i32 { f() }
-    `, 1,
+    `, 1, "VM - Functions - Basic Call",
 );
 
 test_VM(
     `
     fn f(x: i32) -> i32 { x }
     fn main() -> i32 { f(33) }`,
-    33,
+    33, "VM - Functions - Single Argument",
 );
 
 test_VM(
     `
     fn f(x: i32, y: i32) -> i32 { x - y }
     fn main() -> i32 { f(33, 22) }`,
-    11,
+    11, "VM - Functions - Two Arguments",
 );
 
 // Recursive functions
@@ -53,7 +53,7 @@ test_VM(
         if n == 1 { 1 } else { n * fact(n - 1) }
     }
     fn main() -> i32 { fact(10) }`,
-    3628800,
+    3628800, "VM - Functions - Recursive Factorial",
 );
 
 test_VM(
@@ -67,7 +67,7 @@ test_VM(
         }
     }
     fn main() -> i32 { fact(4) }`,
-    24,
+    24, "VM - Functions - Iterative Factorial",
 );
 
 // Loops
@@ -76,7 +76,7 @@ test_VM(
     fn main() -> () {
         while false { 1; }
     }`,
-    undefined,
+    undefined, "VM - Loops - While (False Condition)",
 );
 
 test_VM(
@@ -90,7 +90,7 @@ test_VM(
         }
         x
     }`,
-    2,
+    2, "VM - Loops - While (Single Iteration)",
 );
 
 test_VM(
@@ -102,7 +102,7 @@ test_VM(
         }
         x
     }`,
-    10, "Max depth??"
+    10, "VM - Loops - While (Multiple Iterations)"
 );
 
 test_VM(
@@ -120,7 +120,7 @@ test_VM(
         }
         x
     }`,
-    990000,
+    990000, "VM - Loops - Nested While",
 );
 
 test_VM(
@@ -134,7 +134,7 @@ test_VM(
         }
         i
     }`,
-    1000,
+    1000, "VM - Loops - While with Local Variable",
 );
 
 test_VM(`
@@ -142,7 +142,7 @@ test_VM(`
         let character = 'c';
         return character;
     }`,
-    "c", "Test char"
+    "c", "VM - Basic - Char Literal"
 )
 
 test_VM(
@@ -151,7 +151,7 @@ test_VM(
         let mut abc = "abc";
         abc
     }`,
-    `abc`,
+    `abc`, "VM - Basic - String Literal",
 );
 
 test_VM(
@@ -160,7 +160,7 @@ test_VM(
         let mut abc = "abc" + "xyz";
         abc
     }`,
-    "abcxyz", "Concat strings"
+    "abcxyz", "VM - Basic - String Concatenation"
 );
 
 test_VM(`
@@ -168,7 +168,7 @@ test_VM(`
         let mut x: String = "foo";
         x = "bar";
         x
-    }`, "bar", "String: reassignment to new string");
+    }`, "bar", "VM - String - Reassignment");
 
 test_VM(
     `
@@ -182,7 +182,7 @@ test_VM(
         }
         abc
     }`,
-    "abc",
+    "abc", "VM - String - Scope",
 );
 
 test_VM(
@@ -194,9 +194,9 @@ test_VM(
             xyz_inner
         };
 
-        xyz_outer         
+        xyz_outer
     }`,
-    "xyz", "transfer ownership outside scope"
+    "xyz", "VM - String - Ownership Transfer (Inner Block)"
 );
 
 test_VM(
@@ -206,25 +206,25 @@ test_VM(
             let xyz_inner = "xyz";
             return xyz_inner
         }
-        
+
         let xyz_outer = ownership_transfer();
-        
-        xyz_outer         
+
+        xyz_outer
     }`,
-    "xyz", "transfer ownership outside scope"
+    "xyz", "VM - String - Ownership Transfer (Function Call)"
 );
 
 test_VM(`
     fn main() -> string {
         fn stringPool_init() {
             "xyz";
-        } 
-        
+        }
+
         stringPool_init(); // should not free "xyz" from stringpool? our program becomes trivial!
 
         "xyz"
     }`,
-    "xyz", "Update string pool"
+    "xyz", "VM - String - String Pool Initialization"
 )
 
 test_VM(`
@@ -232,23 +232,23 @@ test_VM(`
         let x = 42;
         let p = &x;
         *p
-    }`, 42, "i32: basic reference and dereference");
-        
+    }`, 42, "VM - References - i32 Immutable Dereference");
+
 test_VM(`
     fn main() -> i32 {
         let mut x = 10;
         let p = &mut x;
         *p = 5;
         x
-    }`, 5, "i32: mut reference write-through");
-        
+    }`, 5, "VM - References - i32 Mutable Write-Through");
+
 test_VM(`
     fn main() -> i32 {
         let mut x = 1;
         let p = &mut x;
         *p = *p + 1;
         x
-    }`, 2, "i32: mutate through reference");
+    }`, 2, "VM - References - i32 Mutate Through Mutable");
 
 test_VM(`
     fn main() -> i32 {
@@ -258,7 +258,7 @@ test_VM(`
             let y = *r;
             y
         }
-    }`, 100, "i32: immutably dereferenced in inner block");
+    }`, 100, "VM - References - i32 Immutable Dereference (Inner Block)");
 
 test_VM(`
     fn main() -> i32 {
@@ -269,16 +269,16 @@ test_VM(`
         p = &mut y;
         *p = 2;
         x + y
-    }`, 3, "i32: reassign mutable reference");
-    
+    }`, 3, "VM - References - i32 Reassign Mutable");
+
 test_VM(`
     fn main() -> i32 {
         let mut x = 7;
         let p = &mut x;
         let pp = &p;
         **pp
-    }`, 7, "i32: double mutable reference (safe read)");
-    
+    }`, 7, "VM - References - i32 Double Mutable Dereference");
+
 test_VM(`
     fn get_ref(x: &i32) -> i32 {
         *x
@@ -286,8 +286,8 @@ test_VM(`
     fn main() -> i32 {
         let x = 99;
         get_ref(&x)
-    }`, 99, "i32: dereference ref passed to function");
-    
+    }`, 99, "VM - References - i32 Immutable Dereference in Function");
+
 test_VM(`
     fn set_ref(x: &mut i32) {
         *x = 123;
@@ -296,8 +296,8 @@ test_VM(`
         let mut a = 0;
         set_ref(&mut a);
         a
-    }`, 123, "i32: mutate via &mut passed to function");
-    
+    }`, 123, "VM - References - i32 Mutate Through Mutable in Function");
+
 test_VM(`
     fn main() -> i32 {
         let mut x = 1;
@@ -306,22 +306,22 @@ test_VM(`
             *p = *p + 10;
         }
         x
-    }`, 11, "i32: mutate in nested block");
-    
+    }`, 11, "VM - References - i32 Mutate in Nested Block");
+
 test_VM(`
     fn main() -> i32 {
         let mut x = 3;
         let p = &mut x;
         *p = *p * 2;
         x
-    }`, 6, "i32: assign based on current value through ref");
-    
+    }`, 6, "VM - References - i32 Mutate Based on Current Value");
+
 test_VM(`
     fn main() -> String {
         let x: String = "abc";
         let r = &x;
         *r
-    }`, "abc", "String: immutable reference and dereference");
+    }`, "abc", "VM - References - String Immutable Dereference");
 
 test_VM(`
     fn main() -> String {
@@ -329,8 +329,8 @@ test_VM(`
         let p = &mut x;
         *p = "end";
         x
-    }`, "end", "String: mutate via &mut dereference");
-        
+    }`, "end", "VM - References - String Mutate Through Mutable");
+
 test_VM(`
     fn main() -> String {
         let mut x: String = "a";
@@ -339,7 +339,7 @@ test_VM(`
             *r = "b";
         }
         x
-    }`, "b", "String: nested mut ref assignment");
+    }`, "b", "VM - References - String Mutate in Nested Block");
 
 test_VM(`
     fn echo(s: String) -> String {
@@ -348,7 +348,7 @@ test_VM(`
 
     fn main() -> String {
         echo("echoed")
-    }`, "echoed", "String: passed and returned from function");
+    }`, "echoed", "VM - References - String Ownership Transfer in Function");
 
 test_VM(`
     fn update(s: &mut String) {
@@ -359,7 +359,7 @@ test_VM(`
         let mut s: String = "old";
         update(&mut s);
         s
-    }`, "new", "String: mutate through &mut in function");
+    }`, "new", "VM - References - String Mutate Through Mutable in Function Argument");
 
 
 test_VM(`
@@ -367,4 +367,4 @@ test_VM(`
         let mut s: String = "old";
         s = "new";
         s
-    }`, "new", "String: assigning a new string");
+    }`, "new", "VM - References - String Reassignment");

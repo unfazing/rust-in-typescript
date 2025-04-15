@@ -259,16 +259,6 @@ export function print_or_throw_error(msg: string, ctx?: ParserRuleContext) {
     }
 }
 
-class TypeError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "TypeError";
-
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, TypeError);
-        }
-    }
-}
 
 // SIMPLE IMPLEMENTATION OF TYPE CHECKING OWNERSHIP 
 // - without considering existence of structs/loops/nested data structures

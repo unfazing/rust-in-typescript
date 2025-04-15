@@ -34,7 +34,7 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const tree = parser.crate();
 
             // Typecheck
-            this.typeChecker.check(tree);// throws error if type error found
+            this.typeChecker.check(tree); // throws error if type error found
 
             // Compile
             const instructions: object[] = this.compiler.compile(tree);
@@ -43,14 +43,14 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const result = this.VM.execute(instructions);
             
             // Send the result to the REPL
-            this.conductor.sendOutput(`Result of expression: ${result}`);
+            this.conductor.sendOutput(`${result}`);
 
         }  catch (error) {
             // Handle errors and send them to the REPL
             if (error instanceof Error) {
-                this.conductor.sendOutput(`Error: ${error.message}`);
+                this.conductor.sendOutput(`${error.message}`);
             } else {
-                this.conductor.sendOutput(`Error: ${String(error)}`);
+                this.conductor.sendOutput(`${String(error)}`);
             }
         }
     }

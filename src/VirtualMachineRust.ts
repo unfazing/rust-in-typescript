@@ -109,10 +109,10 @@ class Stack {
 
 	constructor(bytes: number, starting_address: number) {
 		if (bytes % word_size !== 0) 
-			error(`Runtime Error; [STACK::constructor] Stack size must be divisible by ${word_size}`);
+			throw new Error(`Runtime Error; [STACK::constructor] Stack size must be divisible by ${word_size}`);
 
 		if (starting_address % word_size !== 0) 
-			error(`Runtime Error; [STACK::constructor] Starting address of stack must be divisible by ${word_size}`)
+			throw new Error(`Runtime Error; [STACK::constructor] Starting address of stack must be divisible by ${word_size}`)
 
 		const data = new ArrayBuffer(bytes);
 		const view = new DataView(data);
@@ -1370,7 +1370,7 @@ const Rust_value_to_address = (x: RustValue): number => {
 		return STACK.allocate_String(x);
 	}
 
-	throw new Error("unknown value")
+	throw new Error("Runtime error; [Rust_value_to_address] unknown value")
 }
 
 /* **********************
@@ -1402,7 +1402,7 @@ const binop_microcode = {
 			return new F64RustValue((x as RustValue<number>).val + (y as RustValue<number>).val);
 		}
 
-		throw new Error(`Operation "+" require both numeric operands or string operands`)
+		throw new Error(`Runtime Error; Operation "+" require both numeric operands or string operands`)
     },
     "*": (x: RustValue<number>, y: RustValue<number>) => {
         if (x instanceof I32RustValue && y instanceof I32RustValue) {
@@ -1442,7 +1442,7 @@ const unop_microcode = {
 		} else if (x instanceof F64RustValue) {
 			return new F64RustValue(-x.val);
 		}
-		throw new Error("Unary '-' requires a numeric operand"); // should be handled by typechecker; just sanity check
+		throw new Error("Runtime Error; Unary operator '-' requires a numeric operand"); // should be handled by typechecker; just sanity check
 	},
 
 	// Logical NOT (works on booleans)
@@ -1450,7 +1450,7 @@ const unop_microcode = {
 		if (x instanceof BooleanRustValue) {
 			return new BooleanRustValue(!x.val);
 		}
-		throw new Error("Unary '!' requires a boolean operand");
+		throw new Error("Runtime Error; Unary operator '!' requires a boolean operand");
 	}
 };
 
@@ -1539,7 +1539,7 @@ const microcode = {
 	EXIT_SCOPE: (instr) => {
 
 		if (!STACK.is_Blockframe()) { // sanity check
-			throw new Error("Current stack frame is not a block frame when EXIT_SCOPE instruction is executed.")
+			throw new Error("Runtime Error; [instr: EXIT_SCOPE] Current stack frame is not a block frame when EXIT_SCOPE instruction is executed.")
 		}
 
 		// Deallocate current environment and its latest frame
@@ -1567,7 +1567,7 @@ const microcode = {
 		const lhs_tag = STACK.get_tag(LHS_address)
 
 		if (!is_stack_address(LHS_address) || !is_stack_address(RHS_address)) {
-			throw new Error("Assignment must be done on the stack, never the heap")
+			throw new Error("Runtime Error; [instr: ASSIGN] Assignment must be done on the stack, never the heap")
 		} 
 
 		// Implementing COPY trait
@@ -1619,12 +1619,6 @@ const microcode = {
 		
 		const LHS_address = OS.pop()
 		const RHS_address = OS.pop()
-
-		// The typechecker should have validated that 
-		// the target is of the same type as the assignee
-		// if (STACK.get_tag(LHS_address) !== STACK.get_tag(RHS_address)) { // this check would catch when LHS is False, RHS is True.
-		// 	throw new Error(`Runtime Error; [instr: ASSIGN_DEREF] Cannot assign non-matching type - LHS: ${tagMap[STACK.get_tag(LHS_address)]}, RHS: ${tagMap[STACK.get_tag(RHS_address)]}.`)
-		// }
 
 		// Proceed with normal assignment
 
@@ -1731,7 +1725,7 @@ const microcode = {
 		const reference_address = OS.pop();
 
 		if (!STACK.is_Reference(reference_address)) {
-			throw new Error("Runtime Error; [instr:DEREF] Dereferencing non-reference types");
+			throw new Error("Runtime Error; [instr: DEREF] Dereferencing a non-reference type");
 		}
 
 		push(OS, STACK.get_Reference_target(reference_address));
@@ -1838,7 +1832,7 @@ function run(instrs) {
 	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
 	console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
 	if (HEAP.n_nodes_used > 0) {
-		throw new Error(`Memory leak! ${HEAP.n_nodes_used} heap nodes are not freed`)
+		throw new Error(`Runtime error; Memory leak! ${HEAP.n_nodes_used} heap nodes are not freed`)
 	}
 
 	return program_value;
