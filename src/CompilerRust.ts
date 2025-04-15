@@ -233,6 +233,14 @@ import { CompileTimeEnvFrame, CompileTimeEnvironment, global_compile_environment
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
 
+// wc: write counter
+let wc;
+
+// instrs: instruction array
+let instrs;
+
+let ce: CompileTimeEnvironment;
+
 export class RustCompiler {
     private visitor: RustEvaluatorVisitor;
 
@@ -241,15 +249,14 @@ export class RustCompiler {
     }
 
     compile(tree: ParseTree): object[] {
+        // reset with every run
+        wc = 0
+        instrs = []
+        ce = global_compile_environment
+        
         return this.visitor.visit(tree);
     }
 }
-
-// wc: write counter
-let wc = 0;
-// instrs: instruction array
-let instrs = [];
-let ce: CompileTimeEnvironment = global_compile_environment;
 
 const LOGGING_ENABLED = false; // Set to false to disable logging
 function log(message: any, enclosing_function: string): void {
@@ -320,13 +327,13 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): string {
         const val = ctx.CHAR_LITERAL()
-                    ? new CharRustValue(ctx.getText())
+                    ? new CharRustValue(JSON.parse(ctx.getText()))
                     : ctx.INTEGER_LITERAL()
                     ? new I32RustValue(Number(ctx.getText()))
                     : ctx.FLOAT_LITERAL()
                     ? new F64RustValue(Number(ctx.getText()))
                     : ctx.STRING_LITERAL()
-                    ? new StringRustValue(ctx.getText())
+                    ? new StringRustValue(JSON.parse(ctx.getText()))
                     : ctx.KW_FALSE()
                     ? new BooleanFalseRustValue()
                     : ctx.KW_TRUE()

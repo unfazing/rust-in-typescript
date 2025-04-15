@@ -1,6 +1,7 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
+import { env } from "process";
 
 const LOGGING_ENABLED = false;
 function log(message: any, enclosing_function: string): void {
@@ -573,6 +574,8 @@ class Stack {
 			throw new Error("FP is not pointed to a call frame.")
 		}
 
+		this.free_heap_allocated_memory();
+
 		this.SP = this.FP;
 		this.FP = this.get_Callframe_FP();
 
@@ -616,45 +619,56 @@ class Stack {
 	}
 
 	pop_Blockframe() {
-		// log(`Stack before pop:`, "[POP BLOCK FRAME]")
-		// this.print_stack_state()
-
 		// sanity check
 		if (!this.is_Blockframe()) {
 			throw new Error("FP is not pointed to a block frame.")
 		}
 
-		// iterate through variables on stack to update hasOwner of heap-allocated objects
-		let addr = this.FP
-		while (addr < this.SP) {
-			// console.log(`[STACK::pop_Blockframe] Visiting stack addr ${addr}, tag: ${this.tag_to_string(STACK.get_tag(addr))}`)
-			if (STACK.is_heap_allocated_type(addr)) {
-				const heap_addr = STACK.get_String_Heap_addr(addr) 
-				// check that heap addr is not result on OS and also not yet freed
-				if (STACK.get_String_Heap_addr(peek(OS, 0)) !== heap_addr && this.tag_to_string(HEAP.getTag(heap_addr)) != "Unknown") {
-					// console.log(`[STACK::pop_Blockframe] Freeing heap object at addr ${heap_addr}, tag: ${this.tag_to_string(HEAP.getTag(heap_addr))}`)
-					HEAP.freeMem(heap_addr)
-				}
-			}
-			const size = this.get_size(addr)
-			addr = addr + size
-		}
+		this.free_heap_allocated_memory();
 
 		this.SP = this.FP;
 		this.FP = this.get_Blockframe_FP();
-
-		// log(`Stack after pop:`, "[POP BLOCK FRAME]")
-		// this.print_stack_state()
 	}
 
+	/**
+	 * Iterate through each node on the current stack frame
+	 * to free heap-allocated nodes pointed to by
+	 * valid (unmoved) stack pointers
+	 */
+	free_heap_allocated_memory() {
+		const address_on_OS = peek(OS, 0); // make sure the result is not freed
+		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
+		
+		let addr = this.FP
+		while (addr < this.SP) {
+			// console.log(`[STACK::pop_Blockframe] Visiting stack addr ${addr}, tag: ${this.tag_to_string(STACK.get_tag(addr))}`)
+			if (this.is_heap_allocated_type(addr) && !this.is_moved(addr)) {
+
+				const heap_addr = this.get_heap_allocated_address(addr)
+
+				// check that heap addr is not result on OS and also not yet freed
+				if (is_result_heap_allocated && STACK.get_heap_allocated_address(address_on_OS) === heap_addr) {
+					// do nothing
+				} else {
+					console.log(`[STACK::pop_Blockframe] Visiting stack pointer at addr ${addr}, freeing ${address_to_Rust_value(addr).val}`)
+					HEAP.freeMem(heap_addr)
+				}
+			}
+			
+			const size = this.get_size(addr)
+			addr = addr + size
+		}
+	}
 
 	// actual string value is heap allocated
+	// tag = [1 byte tag, 4 byte payload, 2 byte children, 1 byte to indicate moved (invalid) stack pointer]
 	allocate_String(x: StringRustValue): number {
 		const stack_address = this.allocate(String_tag, 2); // first word is tag, 2nd word is address to the heap string
 
 		const heap_address = HEAP.allocateString(x);
 
-		this.set(stack_address + 1, heap_address);
+		this.set(stack_address + 1, heap_address); // stores heap address in the first child
+		this.set_byte_at_offset(stack_address, 7, 0); // stack pointer is not moved (valid) upon init
 
 		return stack_address;
 	}
@@ -667,11 +681,28 @@ class Stack {
 		return this.get_child(address, 0);
 	}
 
-
 	// returns string node from heap
 	get_String(address: number): StringRustValue {
 		const heap_addr = this.get_String_Heap_addr(address)
 		return HEAP.getString(heap_addr);
+	}
+
+	mark_moved(address: number): void {
+		if (!this.is_heap_allocated_type(address)) {
+			throw new Error("Trying to move a non-referenced type.")
+		}
+
+		this.set_byte_at_offset(address, 7, 1); // 1 == moved
+	}
+
+	is_moved(address: number): boolean {
+		return (this.get_byte_at_offset(address, 7) === 1)
+	}
+
+	// Standardize: every stack pointer should 
+	// stores the heap address of target in its first child
+	get_heap_allocated_address(address: number): number {
+		return this.get_child(address, 0);
 	}
 }
 
@@ -680,9 +711,11 @@ class Heap {
 	private heap: DataView;
 	private free: number = 0;
 	private stringPool: Record<number, { address: number; string: string }[]> = {};
-	private allocatedAddresses: number[][] = [[]]
 	n_nodes_used: number = 0;
 	n_nodes_freed: number = 0;
+
+	// a stack of env allocated to be freed on scope exit
+	private environementStack = []
 
 	constructor(heap_size_bytes: number) {
 		if (heap_size_bytes % (word_size * node_size) !== 0) throw new Error("heap bytes must be divisible by word size * node size");
@@ -694,17 +727,6 @@ class Heap {
 			this.set(i, i + node_size)
 		}
 		this.set(i, -1)
-	}
-
-	private addToAllocatedAddresses(address: number) {
-		// console.log(`[addToAllocatedAddresses] Adding ${address}`)
-		// console.log(`[addToAllocatedAddresses] BEFORE: ${JSON.stringify(this.allocatedAddresses)}`)
-		this.allocatedAddresses[this.allocatedAddresses.length - 1].push(address)
-		// console.log(`[addToAllocatedAddresses] AFTER: ${JSON.stringify(this.allocatedAddresses)}`)
-	}
-
-	extendAllocatedAddress() {
-		push(this.allocatedAddresses, [])
 	}
 
 	freeMem(address: number) {
@@ -725,24 +747,24 @@ class Heap {
 		
 	}
 
-	freeMemOnExitScope() {
-		const alloced_addresses: number[] = this.allocatedAddresses.pop()
-		// console.log(`[freeMemOnExitScope] ${JSON.stringify(alloced_addresses)}`)
-		// console.log(`[freeMemOnExitScope] ${JSON.stringify(this.allocatedAddresses)}`)
-		for (const addr of alloced_addresses) {
-			if (!this.hasOwner(addr)) {
-				if (STACK.is_heap_allocated_type(peek(OS, 0)) && STACK.get_String_Heap_addr(peek(OS, 0)) == addr) {
-					// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr is the result on the OS. Tag: ${tagMap[HEAP.getTag(addr)]} `)
-					continue // don't free heap allocated val if it is the final value on the OS
-				}
-				// console.log(`[freeMemOnExitScope] Addr ${peek(OS, 0)}, TAG: ${tagMap[STACK.get_tag(peek(OS, 0))]}, heap addr: ${STACK.get_String_Heap_addr(peek(OS, 0))}  is the stack addr on the OS} `)
+	// freeMemOnExitScope() {
+	// 	const alloced_addresses: number[] = this.allocatedAddresses.pop()
+	// 	// console.log(`[freeMemOnExitScope] ${JSON.stringify(alloced_addresses)}`)
+	// 	// console.log(`[freeMemOnExitScope] ${JSON.stringify(this.allocatedAddresses)}`)
+	// 	for (const addr of alloced_addresses) {
+	// 		if (!this.hasOwner(addr)) {
+	// 			if (STACK.is_heap_allocated_type(peek(OS, 0)) && STACK.get_String_Heap_addr(peek(OS, 0)) == addr) {
+	// 				// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr is the result on the OS. Tag: ${tagMap[HEAP.getTag(addr)]} `)
+	// 				continue // don't free heap allocated val if it is the final value on the OS
+	// 			}
+	// 			// console.log(`[freeMemOnExitScope] Addr ${peek(OS, 0)}, TAG: ${tagMap[STACK.get_tag(peek(OS, 0))]}, heap addr: ${STACK.get_String_Heap_addr(peek(OS, 0))}  is the stack addr on the OS} `)
 
-				this.freeMem(addr)		
-			} else {
-				// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr has owner. Tag: ${tagMap[HEAP.getTag(addr)]} `)
-			}
-		}
-	}
+	// 			this.freeMem(addr)		
+	// 		} else {
+	// 			// console.log(`[freeMemOnExitScope] Did not free addr ${addr} as addr has owner. Tag: ${tagMap[HEAP.getTag(addr)]} `)
+	// 		}
+	// 	}
+	// }
 
 	allocate(tag: number, size: number): number {
 		if (size > node_size) {
@@ -757,7 +779,6 @@ class Heap {
 		this.free = HEAP.get(this.free);
 		this.heap.setUint8(address * word_size, tag);
 		this.heap.setUint16(address * word_size + size_offset, size);
-		this.addToAllocatedAddresses(address)
 		return address;
 	}
 
@@ -787,14 +808,6 @@ class Heap {
 	
 	getNumberOfChildren(address: number): number {
 		return this.getSize(address) - 1;
-	}
-
-	setHasOwner(address: number) {
-		this.setByte(address, 7, 1);
-	}
-
-	unsetHasOwner(address: number) {
-		this.setByte(address, 7, 0);
 	}
 
 	hasOwner(address: number): boolean {
@@ -838,7 +851,6 @@ class Heap {
 		const address = this.allocate(String_tag, 2);
 		this.set4Bytes(address, 1, hash);
 		this.set2Bytes(address, 5, pool.length);
-		this.setByte(address, 7, 0)
 		pool.push({ address, string });
 		this.stringPool[hash] = pool;
 
@@ -873,7 +885,11 @@ class Heap {
 	//  2 bytes #children, 1 byte unused]
 	// followed by the addresses of its frames
 	allocateEnvironment(numFrames: number): number {
-		return this.allocate(Environment_tag, numFrames + 1);
+		const env_address = this.allocate(Environment_tag, numFrames + 1);
+
+		push(this.environementStack, env_address);
+
+		return env_address;
 	}
 
 	extendEnvironment(newFrame: number, env: number): number {
@@ -896,6 +912,18 @@ class Heap {
 		this.setChild(frameAddr, valIdx, value);
 	}
 
+	freeEnvironmentAndLatestFrame() {
+		const address = this.environementStack.pop();
+
+		const n_children = this.getNumberOfChildren(address);
+		const last_frame_addr = this.getChild(address, n_children - 1);
+		// free the last env frame
+		this.freeMem(last_frame_addr);
+
+		// free the current env
+		this.freeMem(address);
+	}
+
 	// Env Frame
 	// [1 byte tag, 4 bytes unused,
 	//  2 bytes #children, 1 byte unused]
@@ -903,7 +931,7 @@ class Heap {
 	allocateFrame(numberOfValues: number): number {
 		return this.allocate(Frame_tag, numberOfValues + 1);
 	}
-	
+
 }
 
 
@@ -1312,11 +1340,20 @@ const binop_microcode = {
     "^": (x: I32RustValue, y: I32RustValue) => new I32RustValue(x.val ^ y.val),
     
     // Arithmetic operations (return I32RustValue or F64RustValue)
-    "+": (x: RustValue<number>, y: RustValue<number>) => {
+    "+": (x: RustValue<number|string>, y: RustValue<number|string>) => {
+		if (x instanceof StringRustValue && y instanceof StringRustValue) {
+			return new StringRustValue(x.val + y.val);
+		}
+
         if (x instanceof I32RustValue && y instanceof I32RustValue) {
             return new I32RustValue(x.val + y.val);
         }
-        return new F64RustValue(x.val + y.val);
+
+		if (x instanceof F64RustValue || y instanceof F64RustValue) {
+			return new F64RustValue((x as RustValue<number>).val + (y as RustValue<number>).val);
+		}
+
+		throw new Error(`Operation "+" require both numeric operands or string operands`)
     },
     "*": (x: RustValue<number>, y: RustValue<number>) => {
         if (x instanceof I32RustValue && y instanceof I32RustValue) {
@@ -1443,7 +1480,6 @@ const microcode = {
 	GOTO: (instr) => (PC = instr.addr),
 	ENTER_SCOPE: (instr) => {
 		STACK.allocate_Blockframe(E);
-		HEAP.extendAllocatedAddress();
 		const frame_address = HEAP.allocateFrame(instr.num);
 		E = HEAP.extendEnvironment(frame_address, E);
 
@@ -1457,16 +1493,17 @@ const microcode = {
 			throw new Error("Current stack frame is not a block frame when EXIT_SCOPE instruction is executed.")
 		}
 
+		// Deallocate current environment and its latest frame
+		HEAP.freeEnvironmentAndLatestFrame();
 		
 		// restore the environment
 		E = STACK.get_Blockframe_environment();
-		
-		// free nodes without owner on heap
-		HEAP.freeMemOnExitScope()
 
-		// pop the current block frame and the free heap nodes whose owners were allocated in this scope
+		// pop the current block frame and 
+		// free heap nodes allocated in this scope 
+		// THAT HAVE NOT BEEN MOVED
 		STACK.pop_Blockframe();
-		
+	
 	},
 	LD: (instr) => {
 		const addr = HEAP.getEnvValue(E, instr.pos); // this address is either a stack or heap addr
@@ -1477,42 +1514,39 @@ const microcode = {
 		// e.g, LHS = RHS
 
 		const RHS_address = OS.pop();
-
 		const LHS_address = HEAP.getEnvValue(E, instr.pos);
-		if (!STACK.is_heap_allocated_type(RHS_address)) {
-			if (!is_stack_address(LHS_address)) {
-				throw new Error("This variable should be of primitive type and resides on the stack as well.")
-			} 
 
-			if (STACK.is_Unassigned(LHS_address)) {
-				// LHS variable is unassigned (after a block scan)
-				// we initialize a new address to the variable now.
+		if (!is_stack_address(LHS_address) || !is_stack_address(RHS_address)) {
+			throw new Error("Assignment must be done on the stack, never the heap")
+		} 
 
-				// create a copy in the current stack frame
-				//
-				// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
-				// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
-				const copy_addr = STACK.create_copy(RHS_address);
+		// Implementing COPY trait
 
-				// set the heap address to that copy
-				HEAP.setEnvValue(E, instr.pos, copy_addr) 
+		if (STACK.is_Unassigned(LHS_address)) {
+			// LHS variable is unassigned (after a block scan)
+			// we initialize a new address to the variable now.
 
-			} else {
+			// create a copy in the current stack frame
+			//
+			// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
+			// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
+			const copy_addr = STACK.create_copy(RHS_address);
 
-				// this means the variable was already initialized. 
-				// We should perform shallow copy from RHS to LHS, since 
-				// RHS value may go out of scope.
-				STACK.shallow_copy(LHS_address, RHS_address);
-			}
+			// set the heap address to that copy
+			HEAP.setEnvValue(E, instr.pos, copy_addr) 
 
 		} else {
 
-			// RHS is a stack string node.
-			const heap_addr = STACK.get_String_Heap_addr(RHS_address)
-			HEAP.setHasOwner(heap_addr)
-			
-			// update the stack string node point to 
-			HEAP.setEnvValue(E, instr.pos, RHS_address)
+			// this means the variable was already initialized. 
+			// We should perform shallow copy from RHS to LHS, since 
+			// RHS value may go out of scope.
+			STACK.shallow_copy(LHS_address, RHS_address);
+		}
+
+		if (STACK.is_heap_allocated_type(RHS_address)) {
+
+			// Implementing MOVE trait
+			STACK.mark_moved(RHS_address);			
 		}
 
 	},
@@ -1556,7 +1590,6 @@ const microcode = {
 			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
 
-		HEAP.extendAllocatedAddress();
 		// else, must a be a user defined function. Stored on the stack
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
@@ -1568,7 +1601,7 @@ const microcode = {
 
 		E = HEAP.extendEnvironment(
 			frame_address,
-			STACK.get_Closure_Env(fun), // no more env capture in function
+			STACK.get_Closure_Env(fun), 
 		);
 
 		PC = STACK.get_Closure_PC(fun);
@@ -1614,23 +1647,23 @@ const microcode = {
 	RESET: (instr) => {
 
 		while (STACK.is_Blockframe()) {
-			// free environment node + latest env frame of this block frame
-			HEAP.freeMemOnExitScope()
+			HEAP.freeEnvironmentAndLatestFrame();
 
-			// Restore FP. No need to restore E. Also free heap nodes whose owners were allocated in this scope
+			// Restore FP. No need to restore E. 
+			// Also free heap nodes whose owners were allocated in this scope
 			STACK.pop_Blockframe();
 		}
 
 		// Current stack frame must be the first call frame
-		
+
+		// Deallocate current environment and its latest frame
+		HEAP.freeEnvironmentAndLatestFrame();
+
 		// restore PC, E and FP
-		PC = STACK.get_Callframe_PC()
+		PC = STACK.get_Callframe_PC();
 		E = STACK.get_Callframe_environment();
 
-		// free nodes without owner on heap
-		HEAP.freeMemOnExitScope()
-
-		STACK.pop_Callframe() 
+		STACK.pop_Callframe(); 
 	},
 };
 
@@ -1721,7 +1754,7 @@ function run(instrs) {
 		
 		microcode[instr.tag](instr);
 		// STACK.print_stack_state()
-		// print_OS()
+		print_OS()
 	}
 
 	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)

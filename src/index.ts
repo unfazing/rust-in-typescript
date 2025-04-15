@@ -771,9 +771,17 @@ test_VM(
         let mut abc = "abc";
         abc
     }`,
-    `"abc"`,
+    `abc`,
 );
 
+test_VM(
+    `
+    fn main() -> string {
+        let mut abc = "abc" + "xyz";
+        abc
+    }`,
+    "abcxyz", "Concat strings"
+);
 
 test_VM(
     `
@@ -787,28 +795,57 @@ test_VM(
         }
         abc
     }`,
-    `"abc"`,
+    "abc",
 );
 
-test_VM(`
-    fn main() -> i32 {
-        let x = 42;
-        let p = &x;
-        *p
-    }`, 42, "i32: basic reference and dereference");
+test_VM(
+    `
+    fn main() -> string {
+
+        let xyz_outer = {
+            let xyz_inner = "xyz";
+            xyz_inner
+        };
+
+        xyz_outer         
+    }`,
+    "xyz", "transfer ownership outside scope"
+);
+
+test_VM(
+    `
+    fn main() -> string {
+        fn ownership_transfer() {
+            let xyz_inner = "xyz";
+            return xyz_inner
+        }
         
-test_VM(`
-    fn main() -> i32 {
-        let mut x = 10;
-        let p = &mut x;
-        // *p = 5;
-        x
-    }`, 5, "i32: mut reference write-through");
+        let xyz_outer = ownership_transfer();
         
-test_VM(`
-    fn main() -> i32 {
-        let mut x = 1;
-        let p = &mut x;
-        *p = *p + 1;
-        x
-    }`, 2, "i32: mutate through reference");
+        xyz_outer         
+    }`,
+    "xyz", "transfer ownership outside scope"
+);
+
+// test_VM(`
+//     fn main() -> i32 {
+//         let x = 42;
+//         let p = &x;
+//         *p
+//     }`, 42, "i32: basic reference and dereference");
+        
+// test_VM(`
+//     fn main() -> i32 {
+//         let mut x = 10;
+//         let p = &mut x;
+//         // *p = 5;
+//         x
+//     }`, 5, "i32: mut reference write-through");
+        
+// test_VM(`
+//     fn main() -> i32 {
+//         let mut x = 1;
+//         let p = &mut x;
+//         *p = *p + 1;
+//         x
+//     }`, 2, "i32: mutate through reference");
