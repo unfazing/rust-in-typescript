@@ -769,6 +769,13 @@ test_VM(
     1000,
 );
 
+test_VM(`
+    fn main() -> char {
+        let character = 'c';
+        return character;
+    }`,
+    "c", "Test char"
+)
 
 test_VM(
     `
@@ -831,6 +838,19 @@ test_VM(
     }`,
     "xyz", "transfer ownership outside scope"
 );
+
+test_VM(`
+    fn main() -> string {
+        fn stringPool_init() {
+            "xyz";
+        } 
+        
+        stringPool_init(); // should not free "xyz" from stringpool? our program becomes trivial!
+
+        "xyz"
+    }`,
+    "xyz", "Update string pool"
+)
 
 // test_VM(`
 //     fn main() -> i32 {

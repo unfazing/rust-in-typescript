@@ -332,7 +332,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // leaf node
     visitLiteralExpression(ctx: LiteralExpressionContext): string {
         const val = ctx.CHAR_LITERAL()
-                    ? new CharRustValue(JSON.parse(ctx.getText()))
+                    ? new CharRustValue(ctx.getText().slice(1, -1)) // remove ' ' characters
                     : ctx.INTEGER_LITERAL()
                     ? new I32RustValue(Number(ctx.getText()))
                     : ctx.FLOAT_LITERAL()
