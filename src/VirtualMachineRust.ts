@@ -1583,6 +1583,14 @@ const microcode = {
 		} else {
 
 			// this means the variable was already initialized. 
+
+			// we can safely deallocate old heap object because the typechecker
+			// enforces that this object has no dangling references by now
+			if (STACK.is_heap_allocated_type(LHS_address)) {
+				const heap_addr = STACK.get_heap_allocated_address(LHS_address);
+				HEAP.freeMem(heap_addr);			
+			}
+			
 			// We should perform shallow copy from RHS to LHS, since 
 			// RHS value may go out of scope.
 			STACK.shallow_copy(LHS_address, RHS_address);
@@ -1633,6 +1641,14 @@ const microcode = {
 		} else {
 
 			// this means the variable was already initialized. 
+
+			// we can safely deallocate old heap object because the typechecker
+			// enforces that this object has no dangling references by now
+			if (STACK.is_heap_allocated_type(LHS_address)) {
+				const heap_addr = STACK.get_heap_allocated_address(LHS_address);
+				HEAP.freeMem(heap_addr);			
+			}
+
 			// We should perform shallow copy from RHS to LHS, since 
 			// RHS value may go out of scope.
 			STACK.shallow_copy(LHS_address, RHS_address);

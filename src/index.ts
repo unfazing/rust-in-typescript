@@ -992,3 +992,11 @@ test_VM(`
         update(&mut s);
         s
     }`, "new", "String: mutate through &mut in function");
+
+
+test_VM(`
+    fn main() -> String {
+        let mut s: String = "old";
+        s = "new";
+        s
+    }`, "new", "String: assigning a new string");
