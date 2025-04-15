@@ -229,8 +229,7 @@ import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
 import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
-import { LOGGING_ENABLED } from "./index.js";
-import { error } from "console";
+import { LOGGING_ENABLED } from "./TestingUtils.js";
 
 export class RustTypeChecker {
     private root: ParseTree;

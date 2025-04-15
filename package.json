@@ -11,7 +11,9 @@
     "generate-lexer-rust": "antlr4ng -Dlanguage=TypeScript -visitor src/RustLexer.g4",
     "generate-parser-rust": "antlr4ng -Dlanguage=TypeScript -visitor src/RustParser.g4",
     "start": "node dist/index.js",
-    "build-and-run": "yarn build; yarn start"
+    "build-and-run": "yarn build; yarn start",
+    "test-vm": "rollup -c --input src/TestVM.ts; node dist/TestVM.js",
+    "test-typechecker": "rollup -c --input src/TestTypeChecker.ts; node dist/TestTypeChecker.js"
   },
   "repository": {
     "type": "git",

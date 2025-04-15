@@ -40,10 +40,10 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const instructions: object[] = this.compiler.compile(tree);
             
             // Execute instructions on VM
-            // const result = this.VM.execute(instructions);
+            const result = this.VM.execute(instructions);
             
             // Send the result to the REPL
-            // this.conductor.sendOutput(`Result of expression: ${result}`);
+            this.conductor.sendOutput(`Result of expression: ${result}`);
 
         }  catch (error) {
             // Handle errors and send them to the REPL
