@@ -181,7 +181,7 @@ const empty_type_environment = []
 export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = "closure" | "refType" | ScalarTypeName | "unit" | "returnType" | "string"
+export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array"
 
 // Type is a class
 // TypeName is a string. 
@@ -208,6 +208,16 @@ export abstract class Type {
     mark_moved() {
         this.IsMoved = true
     }
+
+    abstract clone(): Type
+
+    clone_types(types: Type[]): Type[] {
+        let cloned_types: Type[] = []
+        for (let i = 0; i < types.length; i++) {
+            cloned_types.push(types[i].clone())
+        }
+        return cloned_types
+    }
 }
 
 export class ScalarType extends Type {
@@ -216,13 +226,36 @@ export class ScalarType extends Type {
         this.IsMutable = is_mut
         this.TypeName = typeName
     }
+    clone(): Type {
+        return new ScalarType(this.TypeName as ScalarTypeName, this.IsMutable)
+    }
 }
+
+export class ArrayType extends Type {
+    ContainedTypes: Type[]
+    BaseType: Type // store type information for empty type
+    constructor(containedTypes: Type[], baseType: Type) {
+        super()
+        this.TypeName = "array"
+        this.ContainedTypes = containedTypes // empty types have []
+        this.BaseType = baseType
+    }
+
+    clone() {
+        return new ArrayType(this.clone_types(this.ContainedTypes), this.BaseType)
+    }
+}
+
 
 export class UnitType extends Type {
     constructor(is_mut?: boolean) {
         super();
         this.IsMutable = is_mut;
         this.TypeName = "unit";
+    }
+
+    clone() {
+        return this
     }
 }
 
@@ -255,6 +288,10 @@ export class ClosureType extends Type {
             }
         }
     }
+
+    clone() {
+        return new ClosureType(this.clone_types(this.ParamTypes), this.ReturnType.clone())
+    }
 }
 
 export class StringType extends Type {
@@ -262,6 +299,10 @@ export class StringType extends Type {
         super()
         this.IsMutable = is_mut
         this.TypeName = "string"
+    }
+
+    clone() {
+        return new StringType(this.IsMutable)
     }
 }
 
@@ -289,6 +330,10 @@ export class ImmutableRefType extends RefType {
         this.InnerType = innerType
         this.IsMutable = is_mut
     }
+
+    clone() {
+        return new ImmutableRefType(this.InnerType.clone(), this.IsMutable)
+    }
 }
 
 export class MutableRefType extends RefType {
@@ -301,6 +346,9 @@ export class MutableRefType extends RefType {
         super.mark_moved()
         this.InnerType.MutableBorrowExists = false
     }
+    clone() {
+        return new MutableRefType(this.InnerType.clone(), this.IsMutable)
+    }
 }
 
 export class ReturnType extends Type {
@@ -310,7 +358,10 @@ export class ReturnType extends Type {
         this.ReturnedType = returnedType
         this.IsMutable = is_mut
         this.TypeName = "returnType"
-    }  
+    }
+    clone() {
+        return new ReturnType(this.ReturnedType.clone(), this.IsMutable)
+    }
 }
 
 export const compare_type = (t1: Type, t2: Type): boolean => {
@@ -352,13 +403,20 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return t1.TypeName === t2.TypeName;
     }
 
+    // Compare strings
     if (t1 instanceof StringType && t2 instanceof StringType) {
         return true
+    }
+
+    // Compare arrays
+    if (t1 instanceof ArrayType && t2 instanceof ArrayType) {
+        return compare_types(t1.ContainedTypes, t2.ContainedTypes)
     }
 
     if (t1 instanceof UnitType) {
         return true;
     }
+
 
     return false;
 };
@@ -436,6 +494,10 @@ export const unparse_type = (t: Type): string => {
 
     if (t instanceof ReturnType) {
         return moved_str + `retType<${unparse_type(t.ReturnedType)}>${borrow_str}`
+    }
+
+    if (t instanceof ArrayType) {
+        return moved_str + `[${unparse_type(t.BaseType)} ; size ${t.ContainedTypes.length}]${borrow_str}`
     }
 
     throw new Error(`[unparse_type] Unknown type of ${JSON.stringify(t)}`);

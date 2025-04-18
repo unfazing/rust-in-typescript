@@ -228,7 +228,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
+import { ArrayType, ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
 import { LOGGING_ENABLED } from "./TestingUtils.js";
 
 export class RustTypeChecker {
@@ -364,6 +364,9 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     // ImmutableRefTypes and ScalarTypes have copy trait and are not moved. 
     // Closures have no owners
     canBeMoved(type: Type): boolean {
+        if (type instanceof ArrayType) {
+            return this.canBeMoved(type.BaseType)
+        }
         return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
     }
 
@@ -536,16 +539,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
     // Used when getting a symbol from a borrow expression or path expression
     getSymbolFromExpression(expr_ctx: ExpressionContext): string {
-        while (expr_ctx instanceof GroupedExpressionContext) {
-            expr_ctx = expr_ctx.expression()
+        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression())
         }
 
-        if (expr_ctx instanceof BorrowExpressionContext) {
-            expr_ctx = expr_ctx.expression()
-        }
-
-        while (expr_ctx instanceof GroupedExpressionContext) {
-            expr_ctx = expr_ctx.expression()
+        if (expr_ctx instanceof IndexExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression(0))
         }
 
         if (expr_ctx instanceof PathExpression_Context) {
@@ -641,11 +640,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (this.canBeMoved(actual_type)) {
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`, ctx);
-            } else {
-                actual_type.mark_moved()
-                log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
-            }
-
+            } 
+            
+            actual_type.mark_moved()
+            log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
         }
 
         return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
@@ -966,6 +964,61 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         return this.visit(ctx.expression());
     }
 
+    // LSQUAREBRACKET innerAttribute* arrayElements? RSQUAREBRACKET
+    visitArrayExpression(ctx: ArrayExpressionContext): Type {
+        if (ctx.arrayElements()) {
+            return this.visit(ctx.arrayElements())
+        }
+        // empty array
+        return new ArrayType([], undefined) 
+    }
+
+    // arrayElements
+    //     : expression (COMMA expression)* COMMA?
+    //     | expression SEMI expression // [0; 5] == [0, 0, 0, 0, 0]
+    visitArrayElements(ctx: ArrayElementsContext): Type {
+        if (ctx.SEMI()) {
+            // all elements are the same - only allowed for copy types
+            const type: Type = this.visit(ctx.expression(0))
+            if (this.canBeMoved(type)) {
+                print_or_throw_error(`Type error in array elements; ${unparse_type(type)} does not have copy trait, unable to make copies into elements of the array`)
+            }
+
+            const size: number = this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext))
+            const copies: Type[] = [];
+            for (let i = 0; i < size; i++) {
+                copies.push(type.clone()); // creates a new copy of the object so that they can be dereferenced and moved
+            }
+            return new ArrayType(copies, type)
+        }
+
+        let type: Type
+        let types: Type[] = []
+        for (const expr_ctx of ctx.expression()) {
+            const next_elem_type: Type = this.visit(expr_ctx)
+            types.push(next_elem_type)
+            if (type === undefined) {
+                type = next_elem_type
+                continue
+            } 
+            if (!compare_type(type, next_elem_type)) {
+                print_or_throw_error(`Type error in array elements; elements of an array must all have same type. Found ${unparse_type(type)} and ${unparse_type(next_elem_type)}`)
+            }
+        }
+        return new ArrayType(types, type.clone())
+    }
+
+    // expression
+    // | expression LSQUAREBRACKET expression RSQUAREBRACKET            # IndexExpression               // 8.2.6
+    visitIndexExpression(ctx: IndexExpressionContext): Type {
+        const index: number = this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext))
+        const array_type: Type = this.visit(ctx.expression(0))
+        if (!(array_type instanceof ArrayType)) {
+            print_or_throw_error(`Type error in index expression; Attempting to index a variable of type ${unparse_type(array_type)}`, ctx)
+        }
+        return (array_type as ArrayType).ContainedTypes[index]
+    }
+
     // ------------------------------ TYPE ---------------------------------------------
 
     // leaf node: returns the type declared in the declaration statement
@@ -998,8 +1051,31 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return this.visit(ctx.bareFunctionType())
         }
 
+        if (ctx.arrayType()) {
+            return this.visit(ctx.arrayType())
+        }
+
         print_or_throw_error("Type error; Unsupported type.", ctx);
     };
+
+    getIntegerLiteral(ctx: LiteralExpressionContext): number {
+        if (ctx.INTEGER_LITERAL()) {
+            return Number(ctx.getText())
+        }
+        print_or_throw_error(`Type error; [getIntegerLiteral] Array length/index literal is not an integer.`, ctx)
+    }
+
+    // arrayType
+    // : LSQUAREBRACKET type_ SEMI expression RSQUAREBRACKET
+    visitArrayType(ctx: ArrayTypeContext): Type {
+        const containedType: Type = this.visit(ctx.type_())
+        let types: Type[] = []
+        const size: number = this.getIntegerLiteral((ctx.expression().getChild(0) as LiteralExpressionContext))
+        for (let i =0; i < size; i++) {
+            types.push(containedType.clone())
+        }
+        return new ArrayType(types, containedType)
+    }
 
     // referenceType
     // : AND lifetime? KW_MUT? typeNoBounds
@@ -1268,6 +1344,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         // do a shalow copy of the inner type during borrowing
         if (expected_type instanceof RefType) {
             expected_type.InnerType = (actual_type as RefType).InnerType; 
+        }
+
+        // if empty array
+        if (expected_type instanceof ArrayType) {
+            expected_type.ContainedTypes = (actual_type as ArrayType).ContainedTypes
         }
 
         // allow variable shadowing (reassignment of symbol)
