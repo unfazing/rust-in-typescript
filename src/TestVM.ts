@@ -368,3 +368,14 @@ test_VM(`
         s = "new";
         s
     }`, "new", "VM - References - String Reassignment");
+
+// Test cases for array
+
+// this should be checked on typechecker side
+test_VM(`
+    fn main() -> String {
+        let mut s: String = "hello";
+        let arr: [String; 2] = [a, "world"];
+        s
+    }`, "Illegal access of a moved variable", "VM - Array - Move ownership of element into array");
+    

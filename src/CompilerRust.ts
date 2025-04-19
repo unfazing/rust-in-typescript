@@ -573,6 +573,56 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         return symbol
     }
 
+    // arrayExpression: 
+    // LSQUAREBRACKET innerAttribute* arrayElements? RSQUAREBRACKET  
+    visitArrayExpression(ctx: ArrayExpressionContext): any {
+        if (ctx.arrayElements()) {
+            this.visit(ctx.arrayElements())
+        } else {
+            instrs[wc++] = { tag: "ARRAY", length: 0 }
+        }
+
+    }
+
+    // arrayElements
+    // : expression (COMMA expression)* COMMA?
+    // | expression SEMI expression
+    visitArrayElements(ctx: ArrayElementsContext) {
+        if (ctx.SEMI()) { 
+            // value SEMI length: init an array of this length with all elements of this value
+            const [value, length]: ExpressionContext[] = ctx.expression() // must have 2 values only
+
+            this.visit(value); // push value on OS
+            this.visit(length); // push length on OS
+
+            instrs[wc++] = { tag: "ARRAY_FILL" } // length is only known at runtime
+
+        } else {
+            const expressionArray: ExpressionContext[] = ctx.expression()
+
+            // push elements in reverse order onto OS
+            for (let i = expressionArray.length - 1; i >= 0; i--) {
+                this.visit(expressionArray[i]);
+            }
+
+            instrs[wc++] = { tag: "ARRAY", length: expressionArray.length }
+        }
+    }
+
+    // expression LSQUAREBRACKET expression RSQUAREBRACKET
+    visitIndexExpression(ctx: IndexExpressionContext) {
+        const [array, index]: ExpressionContext[] = ctx.expression();
+        
+        this.visit(array) 
+        // OS should have an array address by the end of this
+        this.visit(index)
+
+        instrs[wc++] = { tag: "ARRAY_INDEX" }
+    }
+
+    // TODO: implement for loop iterator:
+    // for i in 0..5 { }
+
     visitArithmeticOrLogicalExpression (ctx: ArithmeticOrLogicalExpressionContext): undefined {
         this.visit(ctx.expression(0))
         this.visit(ctx.expression(1))

@@ -1,7 +1,7 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
-import { env } from "process";
+
 
 const LOGGING_ENABLED = false;
 function log(message: any, enclosing_function: string): void {
@@ -56,6 +56,7 @@ const Builtin_tag = 12;
 const String_tag = 13;
 const Reference_tag = 14;
 const Unassigned_tag = 15;
+const Array_tag = 16;
 
 const tagMap = {
 	[False_tag]: "False",
@@ -73,7 +74,8 @@ const tagMap = {
 	[Builtin_tag]: "Builtin",
 	[String_tag]: "String",
 	[Reference_tag]: "Reference",
-	[Unassigned_tag]: "Unassigned"
+	[Unassigned_tag]: "Unassigned",
+	[Array_tag]: "Array"
 };
 
 /* *************************
@@ -159,8 +161,8 @@ class Stack {
         );
 
         for (let addr = this.start_addr; addr < this.start_addr + 30; addr++) {
-            const virtual_addr = this.convert_to_virtual_addr(addr);
-            const word_start = virtual_addr * word_size;
+            const actual_addr = this.convert_to_actual_addr(addr);
+            const word_start = actual_addr * word_size;
             
             const tag = this.stack.getUint8(word_start);
             const bits = this.get_word_bits(word_start);
@@ -197,18 +199,18 @@ class Stack {
 		return address < this.start_addr || address >= this.end_addr;
 	}
 
-	convert_to_virtual_addr(address: number): number {
+	convert_to_actual_addr(address: number): number {
 		return address % this.start_addr;
 	}
 
 	set_raw_word(address: number, raw_word: bigint) {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		this.stack.setBigUint64(virtual_address * word_size, raw_word);
+		const actual_address = this.convert_to_actual_addr(address);
+		this.stack.setBigUint64(actual_address * word_size, raw_word);
 	}
 
 	get_raw_word(address: number): bigint {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		return this.stack.getBigUint64(virtual_address * word_size);
+		const actual_address = this.convert_to_actual_addr(address);
+		return this.stack.getBigUint64(actual_address * word_size);
 	}
 
 	/**
@@ -260,6 +262,29 @@ class Stack {
 		return destination_address;
 	}
 
+	/**
+	 * Copies the array and its elements and allocates them at the current stack posision.
+	 * 
+	 * @param target_address Array address to be copied.
+	 */
+	create_copy_array(target_address: number): number {
+		const target_tag: number = this.get_tag(target_address);
+
+		if (target_tag !== Array_tag) {
+			throw new Error("Cannot copy from a non-array target");
+		}
+
+		const target_size: number = this.get_size(target_address);
+		const bytes_to_copy = target_size + this.get_Array_stride(target_address) * this.get_Array_len(target_address);
+		const destination_address = this.allocate(target_tag, bytes_to_copy);
+		
+		// this.shallow_copy(destination_address, target_address);
+
+		// todo: copy bytes from target to destination
+
+		return destination_address;
+	}
+
 	// allocate "size" number of words on the stack
 	allocate(tag: number, size: number) {
 
@@ -272,30 +297,30 @@ class Stack {
 			throw new Error("Runtime Error; [STACK::allocate] Stack out of space")
 		}
 
-		const virtual_address = this.convert_to_virtual_addr(address);
+		const actual_address = this.convert_to_actual_addr(address);
 
 		// set the first byte to tag
-		this.stack.setUint8(virtual_address * word_size, tag);
+		this.stack.setUint8(actual_address * word_size, tag);
 
 		// number of children = size - 1
-		this.stack.setUint16(virtual_address * word_size + size_offset, size); 
+		this.stack.setUint16(actual_address * word_size + size_offset, size); 
 
 		return address;
 	};
 
-	// Remember to convert to virtual address first before any raw byte operation on the ByteArray.
+	// Remember to convert to actual address first before any raw byte operation on the ByteArray.
 	// e.g. this.stack.get/setFloat64()...
 
 	// get a word in the stack at given address.
 	get(address: number) {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		return this.stack.getFloat64(virtual_address * word_size);
+		const actual_address = this.convert_to_actual_addr(address);
+		return this.stack.getFloat64(actual_address * word_size);
 	}
 
 	// set a word in the stack at given address.
 	set(address: number, x) {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		this.stack.setFloat64(virtual_address * word_size, x);
+		const actual_address = this.convert_to_actual_addr(address);
+		this.stack.setFloat64(actual_address * word_size, x);
 	}
 
 	// child index starts at 0
@@ -308,13 +333,13 @@ class Stack {
     }
 
     get_tag(address: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        return this.stack.getUint8(virtual_address * word_size);
+        const actual_address = this.convert_to_actual_addr(address);
+        return this.stack.getUint8(actual_address * word_size);
     }
 
     get_size(address: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        return this.stack.getUint16(virtual_address * word_size + size_offset); 
+        const actual_address = this.convert_to_actual_addr(address);
+        return this.stack.getUint16(actual_address * word_size + size_offset); 
     }
 
     get_number_of_children(address: number) {
@@ -323,33 +348,33 @@ class Stack {
 	}
 
     set_byte_at_offset(address: number, offset: number, value: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        this.stack.setUint8(virtual_address * word_size + offset, value);
+        const actual_address = this.convert_to_actual_addr(address);
+        this.stack.setUint8(actual_address * word_size + offset, value);
     }
 
     get_byte_at_offset(address: number, offset: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        return this.stack.getUint8(virtual_address * word_size + offset);
+        const actual_address = this.convert_to_actual_addr(address);
+        return this.stack.getUint8(actual_address * word_size + offset);
     }
 
     set_2_bytes_at_offset(address: number, offset: number, value: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        this.stack.setUint16(virtual_address * word_size + offset, value);
+        const actual_address = this.convert_to_actual_addr(address);
+        this.stack.setUint16(actual_address * word_size + offset, value);
     }
 
     get_2_bytes_at_offset(address: number, offset: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        return this.stack.getUint16(virtual_address * word_size + offset);
+        const actual_address = this.convert_to_actual_addr(address);
+        return this.stack.getUint16(actual_address * word_size + offset);
     }
 
     set_4_bytes_at_offset(address: number, offset: number, value: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        this.stack.setUint32(virtual_address * word_size + offset, value);
+        const actual_address = this.convert_to_actual_addr(address);
+        this.stack.setUint32(actual_address * word_size + offset, value);
     }
 
     get_4_bytes_at_offset(address: number, offset: number) {
-        const virtual_address = this.convert_to_virtual_addr(address);
-        return this.stack.getUint32(virtual_address * word_size + offset);
+        const actual_address = this.convert_to_actual_addr(address);
+        return this.stack.getUint32(actual_address * word_size + offset);
     }
 
 	compare_tag(address: number, expected_tag: number) {
@@ -401,13 +426,13 @@ class Stack {
 	}
 
 	set_Int32(address: number, x: number) {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		this.stack.setInt32(virtual_address * word_size, x);
+		const actual_address = this.convert_to_actual_addr(address);
+		this.stack.setInt32(actual_address * word_size, x);
 	}
 
 	get_Int32(address: number): number {
-		const virtual_address = this.convert_to_virtual_addr(address);
-		return this.stack.getInt32(virtual_address * word_size);
+		const actual_address = this.convert_to_actual_addr(address);
+		return this.stack.getInt32(actual_address * word_size);
 	}
 	
 	/**
@@ -648,12 +673,12 @@ class Stack {
 
 				const heap_addr = this.get_heap_allocated_address(addr)
 
-				// DO NOT FREE MEM BECAUSE WE ARE 
-				// MOVING A HEAP-ALLOCATED OBJECT OUT OF THE SCOPE
+				// DO NOT FREE MEM IF WE ARE MOVING 
+				// A HEAP-ALLOCATED OBJECT OUT OF THE SCOPE
 				if (is_result_heap_allocated && STACK.get_heap_allocated_address(address_on_OS) === heap_addr) {
 					// do nothing
 				} else {
-					console.log(`[STACK::pop_Blockframe] Visiting stack pointer at addr ${addr}, freeing ${address_to_Rust_value(addr).val}`)
+					// console.log(`[STACK::pop_Blockframe] Visiting stack pointer at addr ${addr}, freeing ${address_to_Rust_value(addr).val}`)
 					HEAP.freeMem(heap_addr)
 				}
 			}
@@ -706,6 +731,26 @@ class Stack {
 	// stores the heap address of target in its first child
 	get_heap_allocated_address(address: number): number {
 		return this.get_child(address, 0);
+	}
+
+	// Array node = 2 words
+	// 1st word is tag
+	// 2nd word stores length (first 32 bits) and stride (last 32 bits)
+	allocate_Array(len: number, stride: number): number {
+		const stack_address = this.allocate(Array_tag, 2); 
+
+		this.set_4_bytes_at_offset(stack_address + 1, 0, len);
+		this.set_4_bytes_at_offset(stack_address + 1, 4, stride);
+
+		return stack_address;
+	}
+
+	get_Array_len(address): number {
+		return this.get_4_bytes_at_offset(address + 1, 0);
+	}
+
+	get_Array_stride(address): number {
+		return this.get_4_bytes_at_offset(address + 1, 4);
 	}
 }
 
@@ -1556,7 +1601,15 @@ const microcode = {
 	},
 	LD: (instr) => {
 		const addr = HEAP.getEnvValue(E, instr.pos); // this address is either a stack or heap addr
-		// if (is_Unit(val)) error("access of unassigned variable"); => should be checked on the type checker already!
+
+		if (STACK.is_Unassigned(addr)) {
+			throw new Error("Illegal access of unassigned variable"); // sanity check: should be checked on the type checker.
+		}
+
+		if (STACK.is_heap_allocated_type(addr) && STACK.is_moved(addr)) {
+			throw new Error("Illegal access of a moved variable"); // sanity check: should be checked on the type checker.
+		}
+
 		push(OS, addr); 
 	},
 	ASSIGN: (instr) => {
@@ -1582,15 +1635,17 @@ const microcode = {
 			// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
 			const copy_addr = STACK.create_copy(RHS_address);
 
-			// set the heap address to that copy
+			// update the env frame address of LHS 
+			// (since it points to UNASSIGNED node previously)
 			HEAP.setEnvValue(E, instr.pos, copy_addr) 
 
 		} else {
 
 			// this means the variable was already initialized. 
 
-			// we can safely deallocate old heap object because the typechecker
-			// enforces that this object has no dangling references by now
+			// we can safely deallocate old heap object pointed to by LHS
+			// because the typechecker enforces that this object has no 
+			// dangling references by the time an assignmnent happens
 			if (STACK.is_heap_allocated_type(LHS_address)) {
 				const heap_addr = STACK.get_heap_allocated_address(LHS_address);
 				HEAP.freeMem(heap_addr);			
@@ -1750,6 +1805,37 @@ const microcode = {
 		E = STACK.get_Callframe_environment();
 
 		STACK.pop_Callframe(); 
+	},
+	ARRAY: (instr) => {
+
+		let stride = 0;
+
+		// calculate stride: the byte difference between elements in the array
+		if (instr.length > 0) {
+			const first_element = peek(OS, 0)
+			if (STACK.compare_tag(first_element, Array_tag)) {
+				stride = STACK.get_size(first_element) + STACK.get_Array_len(first_element) * STACK.get_Array_stride(first_element);
+			} else {
+				stride = STACK.get_size(first_element);
+			}
+		}
+
+		const array_addr = STACK.allocate_Array(instr.length, stride)
+
+		for (let i = 0; i < instr.length; i++) {
+			const element_addr = OS.pop()
+
+			// These elements are not necessarily in contiguous order.
+			// Hence, must copy their values over to the current position in stack frame
+			STACK.create_copy(element_addr)
+
+			if (STACK.is_heap_allocated_type(element_addr)) {
+				// Implementing MOVE trait
+				STACK.mark_moved(element_addr);			
+			}
+		}
+
+		push(OS, array_addr);
 	},
 };
 

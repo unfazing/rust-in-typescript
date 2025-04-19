@@ -115,6 +115,8 @@ export class CompileTimeEnvironment {
 				return true;
 			}
 		}
+
+		return false;
 	}
 }
 
