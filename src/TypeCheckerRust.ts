@@ -641,6 +641,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`, ctx);
             } 
+
+            if (ctx.expression(1) instanceof IndexExpressionContext) {
+                print_or_throw_error(`Type error in assignment; cannot move out of a non-copy array`)
+            }
             
             actual_type.mark_moved()
             log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
@@ -697,6 +701,10 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
                 if (this.canBeMoved(type)) {
                     if (type.ImmutableBorrowCount > 0 || type.MutableBorrowExists) {
                         print_or_throw_error(`Type error in application; cannot move a borrowed value into function.`, ctx);
+                    }
+
+                    if (expr instanceof IndexExpressionContext) {
+                        print_or_throw_error(`Type error in application; cannot move out of a non-copy array`)
                     }
                     
                     type.mark_moved();
@@ -970,7 +978,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             return this.visit(ctx.arrayElements())
         }
         // empty array
-        return new ArrayType([], undefined) 
+        return new ArrayType([], new UnitType()) 
     }
 
     // arrayElements
@@ -1334,7 +1342,11 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (this.canBeMoved(expected_type)) {
 
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
-                print_or_throw_error(`Type error in assignment; cannot move a borrowed value: ${symbol}`, ctx);
+                print_or_throw_error(`Type error in let statement; cannot move a borrowed value: ${symbol}`, ctx);
+            }
+
+            if (ctx.expression() instanceof IndexExpressionContext) {
+                print_or_throw_error(`Type error in let statement; cannot move out of a non-copy array`)
             }
             
             actual_type.mark_moved()
@@ -1346,7 +1358,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             expected_type.InnerType = (actual_type as RefType).InnerType; 
         }
 
-        // if empty array
         if (expected_type instanceof ArrayType) {
             expected_type.ContainedTypes = (actual_type as ArrayType).ContainedTypes
         }
