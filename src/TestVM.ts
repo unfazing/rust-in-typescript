@@ -1,55 +1,66 @@
 import { test_VM } from './TestingUtils.js';
 
 
-// test_VM(`
-//     fn main() -> i32 {
-//         let x: &i32 = &1;
-//         let y: i32 = 123;
-//         *x
-//     }
-//     `, 1, "")
+test_VM(`
+    fn main() -> i32 {
+        let x: &i32 = &1;
+        let y: i32 = 123;
+        *x
+    }
+    `, 1, "VM - Assigning a reference then allocating new element on the stack")
+
+test_VM(`
+    fn main() -> i32 {
+        let x: & &i32 = && 1;
+        let y: i32 = 123; // overwrite stack mem
+        let z: i32 = 456; // overwrite stack mem
+        **x
+    }
+    `, 1, "VM - Assigning a reference then allocating new element on the stack")
+    
 
 // Array
 // Presently this will throw an error as the literal 1 is loaded on a stack addr > the array placeholder addr.
-// test_VM(`
-//     fn main() {
-//         let x: [&i32; 1] = [&1];
-//     }
-//     `, undefined, "")
+test_VM(`
+    fn main() {
+        let x: [&i32; 1] = [&1];
+    }
+    `, undefined, "")
 
 // ERRORS
-// test_VM(`
-//     fn main() -> string{
-//         let mut arr: [&mut string; 1] = [&mut "123"];
-//         let mut y: string = "456";
-//         arr = [&mut y]; // reassign of an arr
-//         arr[0] = &mut "789"; // set of an arr index
-//         return *arr[0];
-//     }
-//     `, "789", "VM - Assign a &string array and its array elements to new variables")
+test_VM(`
+    fn main() -> string{
+        let mut arr: [&mut string; 1] = [&mut "123"];
+        let mut y: string = "456";
+        arr = [&mut y]; // reassign of an arr
+        arr[0] = &mut "789"; // set of an arr index
+        return *arr[0];
+    }
+    `, "789", "VM - Assign a &string array and its array elements to new variables")
 
 // ERRORS
-// test_VM(`
-//     fn main() -> i32{
-//         let arr2: [&i32 ; 1] = [&1];
-//         let x: i32 = 123;
-//         arr2 = [&x];
-//         arr2[0] = &456;
-//         *arr2[0] 
-//     }
-//     `, "456", "VM - Assign a &i32 array and its array elements to new variables")
+test_VM(`
+    fn main() -> i32{
+        let mut arr2: [&i32 ; 1] = [&1];
+        let x: i32 = 123;
+        arr2 = [&x];
+        arr2[0] = &456;
+        *arr2[0] 
+    }
+    `, 456, "VM - Assign a &i32 array and its array elements to new variables")
 
 // ERRORS
-// test_VM(`
-//     fn main() -> f64 {
-//         let arr: [&i32; 3] = [&1, &2, &3];
-//         let test: i32 = *arr[2];
+test_VM(`
+    fn main() -> i32 {
+        let mut arr: [&i32; 3] = [&1, &2, &3];
+        let test: i32 = *arr[2];
+        return test;
 
-//         let arr2: [&f64; 3] = [&1.0, &2.0, &3.0];
-//         let test2: f64 = *arr2[2];
-//         return test2;
-//     }
-//     `, 2.0, "Valid - Moving a dereferenced element in a copy array")
+        // let mut arr2: [&f64; 3] = [&1.0, &2.0, &3.0];
+        // let test2: f64 = *arr2[2];
+        // return test2;
+    }
+    `, 3.0, "Valid - Moving a dereferenced element in a copy array")
 
 
 
@@ -143,7 +154,7 @@ test_VM(`
     `, undefined, "VM - Create empty array")
 
 // No main found
-test_VM(`fn not_main() -> string {}`, undefined, "VM - No Main Function", true);
+test_VM(`fn not_main() {}`, undefined, "VM - No Main Function", true);
 test_VM(``, undefined, "VM - Empty Program", true);
 
 // Basic expressions
@@ -152,9 +163,10 @@ test_VM("fn main() -> i32 { 2 + 3 }", 5, "VM - Basic - Integer Addition");
 test_VM("fn main() -> i32 { 1; 2; 3 }", 3, "VM - Basic - Expression Sequence");
 test_VM("fn main() -> i32 { if false { 2 } else { 3 } }", 3, "VM - Basic - If-Else (False Condition)");
 test_VM("fn main() -> i32 { 8 + 34; if true { 1 + 2 } else { 17 } }", 3, "VM - Basic - If-Else (True Condition) with Preceding Expression");
+test_VM("fn main() -> f64 { 1.0 }", 1.0, "VM - Basic - Float literal");
+test_VM("fn main() -> f64 { 1.0 + 2.0 }", 3.0, "VM - Basic - Float addition");
 
-test_VM(
-    `
+test_VM(`
     fn main() -> i32 {
         let y: i32 = 4;
         {
@@ -166,15 +178,13 @@ test_VM(
 );
 
 // Functions
-test_VM(
-    `
+test_VM(`
     fn f() -> i32 { 1 }
     fn main() -> i32 { f() }
     `, 1, "VM - Functions - Basic Call",
 );
 
-test_VM(
-    `
+test_VM(`
     fn f(x: i32) -> i32 { x }
     fn main() -> i32 { f(33) }`,
     33, "VM - Functions - Single Argument",
@@ -414,7 +424,7 @@ test_VM(`
     fn main() -> i32 {
         let mut x: i32 = 7;
         let p: &mut i32 = &mut x;
-        let pp: &(&mut i32) = &p; // ANTLR BUG: cannot parse &&i32
+        let pp: & &mut i32 = &p; // ANTLR BUG: cannot parse &&i32
         **pp
     }`, 7, "VM - References - i32 Double Mutable Dereference");
 

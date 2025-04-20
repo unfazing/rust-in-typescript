@@ -106,6 +106,11 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
         // Parse the input
         const tree = parser.crate();
 
+        // Typecheck
+        const typechecker = new RustTypeChecker();
+        typechecker.check(tree);
+
+        // Compile
         const compiler = new RustCompiler();
         const instructions = compiler.compile(tree);
 
