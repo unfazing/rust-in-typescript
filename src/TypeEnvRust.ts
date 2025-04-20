@@ -63,7 +63,7 @@ export class TypeEnvironment {
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
                 if (must_be_closure && !(type_found instanceof ClosureType)) {
-                    throw new Error(`Type error in pathExpression; [lookup_type] Variable ${x} is from an outer scope.`)
+                    throw new Error(`Type error in pathExpression; [lookup_type] Variable '${x}' is from an outer scope.`)
                 }
                 return type_found
             }
@@ -79,7 +79,7 @@ export class TypeEnvironment {
             return this.global_type_frame.frame[x]
         }
 
-        throw new Error(`Type error in pathExpression; [lookup_type] Unbound variable ${x}.`)
+        throw new Error(`Type error in pathExpression; [lookup_type] Unbound variable '${x}'.`)
     }
 
     // extend the environment destructively 
@@ -126,7 +126,7 @@ export class TypeEnvironment {
         if (this.global_type_frame.frame.hasOwnProperty(symbol)) {
             return 0
         }
-        throw new Error(`Type error; [get_scope_depth] Unbound variable ${symbol}.`)
+        throw new Error(`Type error; [get_scope_depth] Unbound variable '${symbol}'.`)
     }
 
     get_current_environment_depth(): number {

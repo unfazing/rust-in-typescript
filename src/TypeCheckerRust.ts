@@ -527,15 +527,15 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         try {type = this.te.lookup_type(symbol)} catch (e) {this.print_or_throw_error(e, ctx)}
         
         if (type === undefined) {
-            this.print_or_throw_error(`Type error in pathExpression; Cannot find symbol ${symbol} in this scope.`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; Cannot find symbol '${symbol}' in this scope.`, ctx)
         }
 
         if (type.IsMoved) {
-            this.print_or_throw_error(`Type error in pathExpression; use of a moved value: ${symbol}`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; use of a moved value: '${symbol}'`, ctx)
         }
 
         if (type.MutableBorrowExists) {
-            this.print_or_throw_error(`Type error in pathExpression; use (read/write) of a mutably borrowed value: ${symbol}`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; use (read/write) of a mutably borrowed value: '${symbol}'`, ctx)
         }
 
         this.log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
@@ -580,7 +580,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             this.add_to_type_env_visualisation(
                 ctx, 
                 VisualisationPoints.BORROWS,
-                `"${ctx.expression().getText()}" is being ${is_mut_borrow ? "mutably" : "immutably"} borrowed. Borrow Status: ${inner_type.ImmutableBorrowCount} immutable borrow(s), ${inner_type.MutableBorrowExists ? 1 : 0} mutable borrow.`
+                `'${ctx.expression().getText()}' is being ${is_mut_borrow ? "mutably" : "immutably"} borrowed. Borrow Status: ${inner_type.ImmutableBorrowCount} immutable borrow(s), ${inner_type.MutableBorrowExists ? 1 : 0} mutable borrow.`
             )
         }
 
@@ -788,7 +788,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 this.add_to_type_env_visualisation(
                     ctx, 
                     VisualisationPoints.MOVES, 
-                    `"${RHS.getText()}" is being moved to "${this.getSymbolFromExpression(LHS)}" by assignment`
+                    `'${RHS.getText()}' is being moved to '${this.getSymbolFromExpression(LHS)}' by assignment`
                 )
             // }
         }
@@ -857,7 +857,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                         this.add_to_type_env_visualisation(
                             ctx, 
                             VisualisationPoints.MOVES,
-                            `"${ctx.callParams().expression(i).getText()}" is being moved to function call of "${ctx.expression().getText()}"`
+                            `'${ctx.callParams().expression(i).getText()}' is being moved to function call of '${ctx.expression().getText()}'`
                         )
                     // }
                 }
@@ -879,7 +879,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                         this.add_to_type_env_visualisation(
                             ctx, 
                             VisualisationPoints.BORROWS,
-                            `"${ctx.callParams().expression(i).getText()}" is being returned as a mutable borrow from a call of "${ctx.expression().getText()}". Borrow Status: ${type.InnerType.ImmutableBorrowCount} immutable borrow(s), ${type.InnerType.MutableBorrowExists ? 1 : 0} mutable borrow.`
+                            `'${ctx.callParams().expression(i).getText()}' is being returned as a mutable borrow from a call of '${ctx.expression().getText()}'. Borrow Status: ${type.InnerType.ImmutableBorrowCount} immutable borrow(s), ${type.InnerType.MutableBorrowExists ? 1 : 0} mutable borrow.`
                         )
                     }
                     return type
@@ -967,7 +967,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         this.log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION");
         // Both operands must be boolean
         if (t1.TypeName !== "bool" || t2.TypeName !== "bool") {
-            this.print_or_throw_error(`Type error in boolean operation; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+            this.print_or_throw_error(`Type error in boolean operation; Boolean operator '${symbol}' requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
         }
 
         return new ScalarType("bool")
@@ -1350,7 +1350,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
 
         // extend the environment to store type mapping for parameters
         const symbol: string = this.visit(ctx.identifier());
-        this.te.extend_type_environment(IS_FUNCTIONTYPEFRAME, `PARAMETERS OF FUNCTION "${symbol}"`)
+        this.te.extend_type_environment(IS_FUNCTIONTYPEFRAME, `PARAMETERS OF FUNCTION '${symbol}'`)
 
         let fun_type: Type 
         try {fun_type = this.te.lookup_type(symbol)} catch (e) {this.print_or_throw_error(e, ctx)}
@@ -1478,11 +1478,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const [is_mut, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         
         if (!ctx.type_()) {
-            this.print_or_throw_error(`Type error in let statement; Missing type declaration for ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Missing type declaration for '${symbol}'.`, ctx);
         }
 
         if (!ctx.expression()) {
-            this.print_or_throw_error(`Type error in let statement; Missing assignment in let statement for ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Missing assignment in let statement for '${symbol}'.`, ctx);
         }
     
         let expected_type: Type = this.visit(ctx.type_());
@@ -1530,7 +1530,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         if (this.canBeMoved(actual_type)) {
 
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
-                this.print_or_throw_error(`Type error in let statement; cannot move a borrowed value: ${symbol}`, ctx);
+                this.print_or_throw_error(`Type error in let statement; cannot move a borrowed value: '${symbol}'`, ctx);
             }
 
             if (ctx.expression() instanceof IndexExpressionContext) {
@@ -1538,13 +1538,13 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             }
             
             actual_type.mark_moved()
-            this.log(`Moved ownership into variable ${symbol}`, "LET_STATEMENT");
+            this.log(`Moved ownership into variable '${symbol}'`, "LET_STATEMENT");
 
             // if (!actual_type.IsTemporary) {
                 this.add_to_type_env_visualisation(
                     ctx, 
                     VisualisationPoints.MOVES,
-                    `"${ctx.expression().getText()}" is being moved to "${symbol}" by let declaration`
+                    `'${ctx.expression().getText()}' is being moved to '${symbol}' by let declaration`
                 ) 
             // }
         }
@@ -1562,11 +1562,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const symbol: string = this.visit(ctx.identifier());
 
         if (!ctx.type_()) {
-            this.print_or_throw_error(`Type error in constant declaration; Missing type declaration for constant ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; Missing type declaration for constant '${symbol}'.`, ctx);
         }
 
         if (!ctx.expression()) {
-            this.print_or_throw_error(`Type error in constant declaration; Missing assignment for constant ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; Missing assignment for constant '${symbol}'.`, ctx);
         }
 
         const expected_type: Type = this.visit(ctx.type_());
@@ -1574,7 +1574,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         this.log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
 
         if (expected_type instanceof RefType) {
-            this.print_or_throw_error(`Type error in constant declaration; constant ${symbol} cannot be a reference type.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; constant '${symbol}' cannot be a reference type.`, ctx);
         }
 
         if (!compare_type(expected_type, actual_type)) {

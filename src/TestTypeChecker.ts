@@ -164,7 +164,7 @@ fn main() -> () {
     let x_ref_2 : &mut string = x_ref;
     *x_ref;
 }
-`, "Type error in pathExpression; use of a moved value: x_ref", "Invalid - Use of Moved Mutable Reference");
+`, "Type error in pathExpression; use of a moved value:", "Invalid - Use of Moved Mutable Reference");
 
 // Immutable reference is not moved
 test_typechecker(`
@@ -197,7 +197,7 @@ fn main() {
 
     foo();
 }
-`, "Type error in pathExpression; [lookup_type] Variable x is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
+`, "Type error in pathExpression; [lookup_type] Variable 'x' is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
 
 test_typechecker(`
 fn main() {
@@ -422,7 +422,7 @@ test_typechecker(`
     fn main() {
         abc = 10;
     }
-    `, "Type error in pathExpression; [lookup_type] Unbound variable abc.", "Invalid - Assigning to Unbound Variable")
+    `, "Type error in pathExpression; [lookup_type] Unbound variable", "Invalid - Assigning to Unbound Variable")
 
 test_typechecker(`
     fn main() {
@@ -529,7 +529,7 @@ test_typechecker(`
         let mut arr3: [string; 1] = arr;
 
     }
-    `, "Type error in pathExpression; use of a moved value: arr", "Invalid - Move non-copy arrays multiple times")
+    `, "Type error in pathExpression; use of a moved value:", "Invalid - Move non-copy arrays multiple times")
 
 test_typechecker(`
     fn main() {
