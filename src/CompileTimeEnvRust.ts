@@ -118,12 +118,23 @@ export class CompileTimeEnvironment {
 
 		return false;
 	}
+
+	get_compile_time_type(symbol: string): CompileTimeType {
+		let frame_index: number = this.frames.length - 1;
+		while (this.frames[frame_index].lookup_idx(symbol) === -1) {
+			if (--frame_index < 0) {
+				throw new Error(`Compiler Error: [get_compile_time_type] Could not find symbol ${symbol}`)
+			}
+		}
+		const idx = this.frames[frame_index].lookup_idx(symbol)
+		return this.frames[frame_index].get_symbol_and_type(symbol)[1]
+	}
 }
 
 
 export class CompileTimeEnvFrame {
-	frame: Symbol[]
-	constructor(symbols: Symbol[]) {
+	frame: SymbolAndType[]
+	constructor(symbols: SymbolAndType[]) {
 		this.frame = []
 		for (const s of symbols) {
 			this.frame.push(s)
@@ -132,12 +143,12 @@ export class CompileTimeEnvFrame {
 
 	lookup_idx(symbol: string): number {
 		for (let i = 0; i < this.frame.length; i++) {
-			if (this.frame[i] === symbol) return i;
+			if (this.frame[i][0] === symbol) return i;
 		}
 		return -1;
 	}
 
-	get_symbol(s: string): Symbol {
+	get_symbol_and_type(s: string): SymbolAndType {
 		const idx: number = this.lookup_idx(s)
 		if (idx === -1) {
 			throw new Error(`[CompileTimeEnvFrame::get_symbol] Symbol ${s} not found in frame!`)
@@ -146,6 +157,7 @@ export class CompileTimeEnvFrame {
 	}
 }
 
+export type SymbolAndType = [Symbol, CompileTimeType]
 export type Symbol = string
 
 
@@ -154,6 +166,25 @@ export type Symbol = string
 // export const global_compile_environment = [global_compile_frame];
 
 export const global_compile_environment: CompileTimeEnvironment = new CompileTimeEnvironment();
+
+// // Refers to the size of the nodes in the VM
+// export enum CompileTimeType {
+//     Boolean = 1,
+//     Unit = 1, 
+//     I32 = 2,
+//     F64 = 2,
+//     Char = 2,
+//     String = 2,
+//     Ref = 2,
+// 	Array = 2,
+// }
+
+
+// // Utility function to get the size of a type
+// export function getTypeSize(type: CompileTimeType): number {
+//     return type;
+// }
+
 
 export class CompileTimeType {
 	size: number;
@@ -168,6 +199,7 @@ export class CompileTimeType {
 }
 
 // Subclasses for each Rust type
+
 export class BooleanType extends CompileTimeType {
 	constructor() {
 		super(1);
@@ -210,11 +242,30 @@ export class RefType extends CompileTimeType {
 	}
 }
 
-export class ClosureType extends CompileTimeType {
-	returnType: CompileTimeType // we only care about returnType to check type of first elem in [f(), 2, 3] 
-	constructor() {
-		super(2);
-	}
+export const CompileTimeTypeSentinels = {
+	Boolean: new BooleanType(),
+	Unit: new UnitType(),
+	I32: new I32Type(),
+	F64: new F64Type(),
+	Char: new CharType(),
+	String: new StringType(),
+	Ref: new RefType(),
 }
 
+// export class ClosureType extends CompileTimeType {
+// 	returnType: CompileTimeType // we only care about returnType to check type of first elem in [f(), 2, 3] 
+// 	constructor() {
+// 		super(2);
+// 	}
+// }
 
+export class ArrayType extends CompileTimeType {
+	ContainedType: CompileTimeType
+	Length: number
+	constructor(containedType: CompileTimeType, length: number) {
+		const size: number = containedType.getSize() * length + 2 // size of array node is 2
+		super(size)
+		this.ContainedType = containedType
+		this.Length = length
+	}
+}

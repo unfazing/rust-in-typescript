@@ -222,7 +222,7 @@ class Stack {
 	 * @param destination_addr Address of node to copy to.
 	 * @param target_addr Address of node to copy from.
 	 */
-	shallow_copy(destination_addr: number, target_addr: number) {
+	shallow_copy(destination_addr: number, target_addr: number, words: number) {
 		if (this.is_out_of_range(destination_addr)) {
 			throw new Error("Runtime Error; [STACK::shallow_copy] destination_addr is out of range. Is it really a stack address?")
 		}
@@ -230,11 +230,9 @@ class Stack {
 		if (this.is_out_of_range(target_addr)) {
 			throw new Error("Runtime Error; [STACK::shallow_copy] target_addr is out of range. Is it really a stack address?")
 		}
-		
-		const target_size: number = this.get_size(target_addr);
-		
+			
 		// copy words as raw 64-bit (8 bytes) chunks
-		for (let i = 0; i < target_size; i++) {
+		for (let i = 0; i < words; i++) {
 			
 			// Read and write raw bits (no type interpretation)
 			const raw_word_bits = this.get_raw_word(target_addr + i);			
@@ -253,35 +251,23 @@ class Stack {
 		const target_size: number = this.get_size(target_address);
 		const target_tag: number = this.get_tag(target_address);
 
+		// if (target_tag === Reference_tag) {
+			// check if underlying address of borrow is on stack and is greater than SP. throw error
+			// const underlying_addr: number = STACK.get_Reference_target(target_address)
+			// if (is_stack_address(underlying_addr) && underlying_addr > this.SP ) {
+			// 	throw new Error("Runtime error; [STACK::create_copy] Creating a copy of a borrow whose underlying value is in invalid stack memory region.")
+			// }
+		// }
+
 		const destination_address = this.allocate(target_tag, target_size);
-		this.shallow_copy(destination_address, target_address);
+		const words: number = this.get_size(target_address);
+
+		this.shallow_copy(destination_address, target_address, words);
 
 		return destination_address;
 	}
 
-	/**
-	 * Copies the array and its elements and allocates them at the current stack posision.
-	 * 
-	 * @param target_address Array address to be copied.
-	 */
-	create_copy_array(target_address: number): number {
-		const target_tag: number = this.get_tag(target_address);
-
-		if (target_tag !== Array_tag) {
-			throw new Error("Cannot copy from a non-array target");
-		}
-
-		const target_size: number = this.get_size(target_address);
-		const bytes_to_copy = target_size + this.get_Array_stride(target_address) * this.get_Array_len(target_address);
-		const destination_address = this.allocate(target_tag, bytes_to_copy);
-		
-		// this.shallow_copy(destination_address, target_address);
-
-		// todo: copy bytes from target to destination
-
-		return destination_address;
-	}
-
+	// stack word: [1 byte tag, 4 unused bytes, 2 bytes size, 1 unused byte]
 	// allocate "size" number of words on the stack
 	allocate(tag: number, size: number) {
 
@@ -299,6 +285,7 @@ class Stack {
 		// set the first byte to tag
 		this.stack.setUint8(actual_address * word_size, tag);
 
+		// set size
 		// number of children = size - 1
 		this.stack.setUint16(actual_address * word_size + size_offset, size); 
 
@@ -335,7 +322,10 @@ class Stack {
     }
 
     get_size(address: number) {
-        const actual_address = this.convert_to_actual_addr(address);
+		const actual_address = this.convert_to_actual_addr(address);
+		if (STACK.get_tag(address) === Array_tag) {
+			return STACK.get_Array_len(address) * STACK.get_Array_element_size(address) + 2
+		}
         return this.stack.getUint16(actual_address * word_size + size_offset); 
     }
 
@@ -386,26 +376,32 @@ class Stack {
 	}
 
 	// allocation of primitive types
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	allocate_False(): number {
 		return this.allocate(False_tag, 1); 
 	}
 
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	is_False(address: number): boolean {
 		return this.get_tag(address) === False_tag
 	}
 
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	allocate_True(): number {
 		return this.allocate(True_tag, 1); 
 	}
 
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	is_True(address: number): boolean {
 		return this.get_tag(address) === True_tag
 	}
 
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	is_Boolean(address: number): boolean {
 		return this.is_True(address) || this.is_False(address);
 	}
 
+	// [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
 	allocate_Unit(): number {
         return this.allocate(Unit_tag, 1);
     }
@@ -464,7 +460,7 @@ class Stack {
     }
 
 	get_F64(address: number): F64RustValue {
-		return new I32RustValue(STACK.get(address + 1)); // second word in f64 node stores the number
+		return new F64RustValue(STACK.get(address + 1)); // second word in f64 node stores the number
 	}
 
 	allocate_Char(x: CharRustValue): number {
@@ -482,7 +478,7 @@ class Stack {
         return this.get_tag(address) === Char_tag;
 	}
 	
-	// [1 byte tag, 1 byte is_mut, 3 bytes unused, 2 bytes #children, 1 byte unused]
+	// [1 byte tag, 1 byte is_mut, 3 bytes unused, 2 bytes size, 1 byte unused]
 	// followed by the address of referenced object.
 	allocate_Reference(target_addr: number, is_mut_borrow: boolean): number {
 		const address = this.allocate(Reference_tag, 2);
@@ -510,7 +506,7 @@ class Stack {
 
 	// Builtins
 	// [1 byte tag, 1 byte id, 3 bytes unused,
-	//  2 bytes #children, 1 byte unused]
+	//  2 bytes size, 1 byte unused]
 	// Note: #children is 0
 	allocate_Builtin(id: number): number {
 		const addr = this.allocate(Builtin_tag, 1);
@@ -523,7 +519,7 @@ class Stack {
 	}
 
 	// [1 byte tag, 1 byte arity, 2 bytes pc, 1 byte unused,
-	//  2 bytes #children, 1 byte unused]
+	//  2 bytes size, 1 byte unused]
 	// followed by the address of env
 	allocate_Closure(arity: number, pc: number, env): number {
 		// first word is tag with PC and arity
@@ -550,7 +546,7 @@ class Stack {
 
 	// call frame
 	// [1 byte tag, 1 byte unused, 2 bytes pc,
-	//  1 byte unused, 2 bytes #children, 1 byte unused]
+	//  1 byte unused, 2 bytes size, 1 byte unused]
 	// followed by the address of env
 	allocate_Callframe(env_address: number, pc: number): number {
 		// log(`Stack before allot:`, "ALLOCATING CALL FRAME")
@@ -608,7 +604,7 @@ class Stack {
 
 	// block frame
 	// [1 byte tag, 4 bytes unused,
-	//  2 bytes #children, 1 byte unused]
+	//  2 bytes size, 1 byte unused]
 	// followed by the address of env
 	allocate_Blockframe(env_addr: number): number {
 
@@ -658,9 +654,45 @@ class Stack {
 	 * valid (unmoved) stack pointers
 	 */
 	free_heap_allocated_memory(starting_addr: number) {
+		// let x: string =  "a" + "b";
+		
+		// stack mem before cleanup:
+		// 0: [placeholder of x]
+		// 1: "a" -> which points to "a" on heap
+		// 2: "b" -> which points to "b" on heap
+		// 3: "ab" -> which points to "ab" on 
+		// 4: stack pointer
+		
+		// stack mem after coping result to placeholder
+		// 0: copy of "ab"
+		// 1: "a" -> which points to "a" on heap [!artifacts]
+		// 2: "b" -> which points to "b" on heap [!artifacts]
+		// 3: "ab" -> which points to "ab" on heap [!artifacts]
+		// 4: stack pointer
 
-		// the address of the OS is the object we are moving out of scope!
-		const address_on_OS = peek(OS, 0); 
+		// stack mem after cleanup
+		// 0: copy of "ab"
+		// 1: stack pointer
+
+
+		// let x: string = f();
+		
+		
+		// stack mem during function call:
+		// 0: [placeholder of x]
+		// 1: CallFrame of f
+		// 2: string value of f()
+		// 3: -----------> stack pointer
+
+		
+		// stack mem after function call:
+		// 0: [placeholder of x]
+		// 1: CallFrame of f ---------> stack pointer
+		// 2: string value of f()
+
+	
+		// the address at the top of the OS is the object we are moving out of scope!
+		const address_on_OS = peek(OS, 0); // case where RHS is a call or block expr
 		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
 		
 		let addr = starting_addr;
@@ -686,7 +718,7 @@ class Stack {
 	}
 
 	// actual string value is heap allocated
-	// tag = [1 byte tag, 4 byte payload, 2 byte children, 1 byte to indicate moved (invalid) stack pointer]
+	// tag = [1 byte tag, 4 byte payload, 2 byte size, 1 byte to indicate moved (invalid) stack pointer]
 	allocate_String(x: StringRustValue): number {
 		const stack_address = this.allocate(String_tag, 2); // first word is tag, 2nd word is address to the heap string
 
@@ -730,14 +762,21 @@ class Stack {
 		return this.get_child(address, 0);
 	}
 
+	set_SP_to_addr(addr: number) {
+		this.SP = addr
+	}
+	
+	get_SP(): number {
+		return this.SP
+	}
 	// Array node = 2 words
-	// 1st word is tag
-	// 2nd word stores length (first 32 bits) and stride (last 32 bits)
-	allocate_Array(len: number, stride: number): number {
+	// 1st word is [1 byte tag, 4 bytes unused, 2 bytes size, 1 byte unused]
+	// 2nd word stores length (first 32 bits) and elementSize (last 32 bits)
+	allocate_Array(len: number, elementSize: number): number {
 		const stack_address = this.allocate(Array_tag, 2); 
 
 		this.set_4_bytes_at_offset(stack_address + 1, 0, len);
-		this.set_4_bytes_at_offset(stack_address + 1, 4, stride);
+		this.set_4_bytes_at_offset(stack_address + 1, 4, elementSize);
 
 		return stack_address;
 	}
@@ -746,7 +785,7 @@ class Stack {
 		return this.get_4_bytes_at_offset(address + 1, 0);
 	}
 
-	get_Array_stride(address): number {
+	get_Array_element_size(address): number {
 		return this.get_4_bytes_at_offset(address + 1, 4);
 	}
 
@@ -1346,7 +1385,8 @@ const address_to_Rust_value = (address: number): RustValue => {
 	let value: RustValue | undefined;
 
 	if (STACK.is_Unassigned(address)) {
-		throw new Error("Runtime Error; [address_to_Rust_value] Access of uninitialized variable.");
+		// console.log("Runtime WARNING; [address_to_Rust_value] Access of uninitialized variable.");
+		return new RustValue("Unassigned")
 	}
 
 	if (STACK.is_False(address)) {
@@ -1379,6 +1419,10 @@ const address_to_Rust_value = (address: number): RustValue => {
 
 	if (STACK.is_String(address)) {
 		value = STACK.get_String(address);
+	}
+
+	if (STACK.compare_tag(address, Array_tag)) {
+		value = new RustValue("<array>"); // we should not use the array value
 	}
 
 	if (STACK.compare_tag(address, Closure_tag)) {
@@ -1612,16 +1656,17 @@ const microcode = {
 		const addr = HEAP.getEnvValue(E, instr.pos); // this address is either a stack or heap addr
 
 		if (STACK.is_Unassigned(addr)) {
-			throw new Error("Illegal access of unassigned variable"); // sanity check: should be checked on the type checker.
+			throw new Error("Runtime error; [instr: LD] Illegal access of unassigned variable"); // sanity check: should be checked on the type checker.
 		}
 
 		if (STACK.is_heap_allocated_type(addr) && STACK.is_moved(addr)) {
-			throw new Error("Illegal access of a moved variable"); // sanity check: should be checked on the type checker.
+			throw new Error("Runtime error; [instr: LD] Illegal access of a moved variable"); // sanity check: should be checked on the type checker.
 		}
 
 		push(OS, addr); 
 	},
 	STACK_ALLOCATE: (instr) => {
+		// ensures no unused/temp artifacts on the stack
 		const address = STACK.allocate(Unassigned_tag, instr.size);
 		HEAP.setEnvValue(E, instr.pos, address);
 
@@ -1631,12 +1676,13 @@ const microcode = {
 	COPY_OR_MOVE: (instr) => {
 		const RHS_address = OS.pop();
 		const LHS_address = HEAP.getEnvValue(E, instr.pos); // allocated position for this variable on the stack
-
+		
 		if (!STACK.compare_tag(LHS_address, Unassigned_tag)) { // Sanity check
 			throw new Error("Runtime Error; [instr: COPY_OR_MOVE] LHS must be unassigned during let/const declaration.")
 		} 
 		
-		STACK.shallow_copy(LHS_address, RHS_address);
+		const words: number = STACK.get_size(RHS_address);
+		STACK.shallow_copy(LHS_address, RHS_address, words);
 
 		if (STACK.is_heap_allocated_type(RHS_address)) {
 			// Implementing MOVE trait
@@ -1666,15 +1712,16 @@ const microcode = {
 
 		// we can safely deallocate old heap object pointed to by LHS
 		// because the typechecker enforces that this object has no 
-		// dangling references by the time an assignmnent happens
+		// dangling references by the time an assignnment happens
 		if (STACK.is_heap_allocated_type(LHS_address)) {
 			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
 			HEAP.freeMem(heap_addr);			
 		}
 		
+		const words: number = STACK.get_size(RHS_address);
 		// We should perform shallow copy from RHS to LHS, since 
 		// RHS value may go out of scope.
-		STACK.shallow_copy(LHS_address, RHS_address);
+		STACK.shallow_copy(LHS_address, RHS_address, words);
 		
 		if (STACK.is_heap_allocated_type(RHS_address)) {
 			// Implementing MOVE trait
@@ -1707,7 +1754,9 @@ const microcode = {
 		
 		// We should perform shallow copy from RHS to LHS, since 
 		// RHS value may go out of scope.
-		STACK.shallow_copy(LHS_address, RHS_address);
+		const words: number = STACK.get_size(RHS_address);
+
+		STACK.shallow_copy(LHS_address, RHS_address, words);
 		
 		if (STACK.is_heap_allocated_type(RHS_address)) {
 			// Implementing MOVE trait
@@ -1813,37 +1862,67 @@ const microcode = {
 
 		STACK.pop_Callframe(); 
 	},
-	// ARRAY: (instr) => {
+                
 
-	// 	let stride = 0;
+	ARRAY_PLACEHOLDER: (instr) => {
+		const size: number = instr.length * instr.elementSize + 2 // 2 === size of array node
+		const array_placeholder_addr = STACK.allocate(Unassigned_tag, size)
+		push(OS, array_placeholder_addr)
+	},
 
-	// 	// calculate stride: the byte difference between elements in the array
-	// 	if (instr.length > 0) {
-	// 		const first_element = peek(OS, 0)
-	// 		if (STACK.compare_tag(first_element, Array_tag)) {
-	// 			stride = STACK.get_size(first_element) + STACK.get_Array_len(first_element) * STACK.get_Array_stride(first_element);
-	// 		} else {
-	// 			stride = STACK.get_size(first_element);
-	// 		}
-	// 	}
+	ARRAY_FILL: (instr) => {
+		// OS currently has [array_placeholder_addr, value_addr]
+		const value_addr: number = OS.pop()
+		const array_placeholder_addr: number = OS.pop()
 
-	// 	const array_addr = STACK.allocate_Array(instr.length, stride)
+		// copy or move the values over to the placeholder block of memory
+		STACK.set_SP_to_addr(array_placeholder_addr)
+		STACK.allocate_Array(instr.length, instr.elementSize)
+		for (let i = 0; i < instr.length; i++) {
+			STACK.create_copy(value_addr)
+		}
+		if (STACK.is_heap_allocated_type(value_addr)) {
+			// Implementing MOVE trait
+			STACK.mark_moved(value_addr);
+		}
 
-	// 	for (let i = 0; i < instr.length; i++) {
-	// 		const element_addr = OS.pop()
+		push(OS, array_placeholder_addr)
+	},
 
-	// 		// These elements are not necessarily in contiguous order.
-	// 		// Hence, must copy their values over to the current position in stack frame
-	// 		STACK.create_copy(element_addr)
+	// &1
+	// 
 
-	// 		if (STACK.is_heap_allocated_type(element_addr)) {
-	// 			// Implementing MOVE trait
-	// 			STACK.mark_moved(element_addr);			
-	// 		}
-	// 	}
+	ARRAY: (instr) => {
+		// OS currently has [array_placeholder_addr, elem_n_addr, elem_n-1 addr, ... elem_1_addr] 
+		// elements are in reverse order on OS
 
-	// 	push(OS, array_addr);
-	// },
+		const element_addrs: number[] = [] 
+		for (let i = 0; i < instr.length; i++) {
+			element_addrs.push(OS.pop()) // values are in correct order in `element_addrs` array
+		}
+		const array_placeholder_addr: number = OS.pop()
+
+		// copy or move the values over to the placeholder block of memory
+		STACK.set_SP_to_addr(array_placeholder_addr)
+		STACK.allocate_Array(instr.length, instr.elementSize)
+		for (const element_addr of element_addrs) {
+			STACK.create_copy(element_addr)
+			if (STACK.is_heap_allocated_type(element_addr)) {
+				// Implementing MOVE trait
+				STACK.mark_moved(element_addr);
+			}
+		}
+
+        push(OS, array_placeholder_addr)
+	},
+
+	ARRAY_INDEX: (instr) => {
+		const index: number = OS.pop()
+		const array_addr: number = OS.pop()
+		const element_addr = array_addr + 2 + address_to_Rust_value(index).val * STACK.get_Array_element_size(array_addr)
+		// console.log(`Array address: ${array_addr}, element address: ${element_addr}`)
+		push(OS, element_addr)
+	}
 };
 
 const heap_Environment_display = (env_address) => {
@@ -1900,7 +1979,7 @@ function run(instrs) {
 	// Run codes on VM
 	while (!(instrs[PC].tag === "DONE")) {
 		const instr = instrs[PC++];
-		log(JSON.stringify(instr), "INS")
+		log(JSON.stringify(instr), "Instr")
 		
 		microcode[instr.tag](instr);
 		STACK.print_stack_state()
@@ -1946,9 +2025,9 @@ export class RustVirtualMachine {
 const print_OS = () => {
 	if (!LOGGING_ENABLED) return
 
-	console.log("Printing OS:\n")
+	console.log("OS:")
 	for (let i = 0; i < OS.length; i = i + 1) {
 		const val = OS[i];
-		console.log(i + ": " + JSON.stringify(address_to_Rust_value(val)) + "\n");
+		console.log(i + " - " + JSON.stringify(address_to_Rust_value(val)));
 	}
 };

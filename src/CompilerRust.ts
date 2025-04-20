@@ -229,9 +229,10 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { BooleanType, CharType, CompileTimeEnvFrame, CompileTimeEnvironment, CompileTimeType, F64Type, global_compile_environment, I32Type, RefType, StringType, Symbol, UnitType } from './CompileTimeEnvRust.js';
+import { ArrayType, CompileTimeEnvFrame, CompileTimeEnvironment, CompileTimeType, CompileTimeTypeSentinels, global_compile_environment, SymbolAndType } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
+import { createContext } from "vm";
 
 // wc: write counter
 let wc;
@@ -258,6 +259,7 @@ export class RustCompiler {
     }
 }
 
+// const LOGGING_ENABLED = true; // Set to false to disable logging
 const LOGGING_ENABLED = false; // Set to false to disable logging
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
@@ -270,7 +272,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     visitCrate (ctx: CrateContext): object[] {
         // scan out local declarations in the global frame
         // in our Rust sublanguage, global frames only allow function declarations and constant declarations.
-        let locals: Symbol[] = [];
+        let locals: SymbolAndType[] = [];
         ctx.item().forEach(item => {
             log(`SCANNING OUTER MOST BLOCK: ${item.getText()}`, "CRATE");
             
@@ -280,16 +282,19 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                 throw new Error("Compiler error; this item is not implemented;")
             }
 
-            
             if (visItem.function_()) {
                 const symbol: string = this.visit(visItem.function_().identifier());
+                const retType: CompileTimeType = visItem.function_().functionReturnType()
+                                                    ? this.visit(visItem.function_().functionReturnType())
+                                                    : CompileTimeTypeSentinels.Unit
                 log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "CRATE");
-                locals.push(symbol);
+                locals.push([symbol, retType]);
             }
             else if (visItem.constantItem()) {
                 const symbol: string = this.visit(visItem.constantItem().identifier());
+                const type: CompileTimeType = this.visit(visItem.constantItem().type_())
                 log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "CRATE");
-                locals.push(symbol);
+                locals.push([symbol, type]);
             }
         });
 
@@ -412,7 +417,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
         
         // scan out local declarations - TODO: there cant be nested sequences right?
-        let locals: Symbol[] = [];
+        let locals: SymbolAndType[] = [];
         log(`<<< SCANNING OUT LOCAL DECLARATIONS >>>`, "BLOCK_EXPRESSION");
 
         const statements = ctx.statements().statement();
@@ -420,20 +425,24 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             const stmt = statement.getChild(0) // each statement can only have 1 child
             // log(`SCANNING STATEMENT ${i}: ${stmt.getText()}`, "BLOCK_EXPRESSION");
             if (stmt instanceof LetStatementContext) {
-                let symbol: string = this.visit(stmt.patternNoTopAlt())
-                symbol = symbol.startsWith("mut ") ? symbol.substring(4) : symbol;
+                const symbol: string = this.visit(stmt.patternNoTopAlt())
+                const type: CompileTimeType = this.visit(stmt.type_())
                 log(`FOUND LET LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
-                locals.push(symbol)
+                locals.push([symbol, type])
             } else if (stmt instanceof ItemContext) {
                 if (stmt.visItem() != null) {
                     if (stmt.visItem().function_() != null) {
-                        let symbol = this.visit(stmt.visItem().function_().identifier())
+                        const symbol: string = this.visit(stmt.visItem().function_().identifier())
+                        const retType: CompileTimeType = stmt.visItem().function_().functionReturnType()
+                                    ? this.visit(stmt.visItem().function_().functionReturnType())
+                                    : CompileTimeTypeSentinels.Unit
                         log(`FOUND FUNCTION LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
-                        locals.push(symbol);
+                        locals.push([symbol, retType]);
                     } else if (stmt.visItem().constantItem() != null) {
-                        let symbol = this.visit(stmt.visItem().constantItem().identifier())
+                        const symbol: string = this.visit(stmt.visItem().constantItem().identifier())
+                        const type: CompileTimeType = this.visit(stmt.visItem().constantItem().type_())
                         log(`FOUND CONST LOCAL SYMBOL: ${symbol}`, "BLOCK_EXPRESSION");
-                        locals.push(symbol);
+                        locals.push([symbol, type]);
                     }
                 }
             }
@@ -483,27 +492,20 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
     }
 
+    // Used when getting a symbol from a borrow expression or path expression
     getSymbolFromExpression(expr_ctx: ExpressionContext): string {
-        while (expr_ctx instanceof GroupedExpressionContext) {
-            expr_ctx = expr_ctx.expression()
+        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext || expr_ctx instanceof DereferenceExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression())
         }
 
-        if (expr_ctx instanceof BorrowExpressionContext) {
-            expr_ctx = expr_ctx.expression()
-        }
-
-        if (expr_ctx instanceof DereferenceExpressionContext) {
-            expr_ctx = expr_ctx.expression()
-        }
-
-        while (expr_ctx instanceof GroupedExpressionContext) {
-            expr_ctx = expr_ctx.expression()
+        if (expr_ctx instanceof IndexExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression(0))
         }
 
         if (expr_ctx instanceof PathExpression_Context) {
             return this.visit(expr_ctx.pathExpression().getChild(0))
         }
-        throw new Error("Compiler Error in Assignment: COULD NOT FIND PATH EXPRESSION TO RETRIEVE SYMBOL")
+        throw new Error(`Compiler Error in Assignment; [getSymbolFromExpression] The ExpressionContext provided (${expr_ctx.getText()}) does not have a PathExpressionContext on the path to leaf node.`)
     }
     
 
@@ -545,6 +547,13 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                 pos: ce.compile_time_environment_position(symbol),
             };
         
+        } else if (LHS instanceof IndexExpressionContext) {
+            // loads the address of the indexed element onto OS
+            this.visit(LHS) 
+
+            instrs[wc++] = {
+                tag: "ASSIGN_DEREF", 
+            };
         } else {
             throw new Error("Compilation error in Assignment; LHS does not support assignment")
         }
@@ -588,30 +597,91 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
     }
 
+    getIntegerLiteral(ctx: LiteralExpressionContext): number {
+        if (ctx.INTEGER_LITERAL()) {
+            return Number(ctx.getText())
+        }
+        throw new Error(`Compiler error; [getIntegerLiteral] Array length/index literal is not an integer.`)
+    }
+
+
+    // Retrieve array size during compile time
+    // arrayElements
+    // : expression (COMMA expression)* COMMA?
+    // | expression SEMI expression
+    getExpressionSize(ctx: ExpressionContext): number {
+        if (ctx instanceof LiteralExpression_Context) {
+            const result: number = ctx.literalExpression().STRING_LITERAL()
+                                    ? CompileTimeTypeSentinels.String.getSize()
+                                    : ctx.literalExpression().CHAR_LITERAL()
+                                    ? CompileTimeTypeSentinels.Char.getSize()
+                                    : ctx.literalExpression().FLOAT_LITERAL()
+                                    ? CompileTimeTypeSentinels.F64.getSize()
+                                    : ctx.literalExpression().INTEGER_LITERAL()
+                                    ? CompileTimeTypeSentinels.I32.getSize()
+                                    : ctx.literalExpression().KW_FALSE() || ctx.literalExpression().KW_TRUE()
+                                    ? CompileTimeTypeSentinels.Boolean.getSize()
+                                    : -1
+
+            if (result === -1) {
+                throw new Error(`Compiler Error; Unknown type for literal expression: ${ctx.getText()}`)
+            }
+            return result
+        }
+
+        if (ctx instanceof BorrowExpressionContext) {
+            return CompileTimeTypeSentinels.Ref.getSize()
+        }
+
+        if (ctx instanceof PathExpression_Context) {
+            const symbol: string = this.getSymbolFromExpression(this.visit(ctx))
+            return ce.get_compile_time_type(symbol).getSize()
+        }
+
+        if (ctx instanceof DereferenceExpressionContext) {
+            const symbol: string = this.getSymbolFromExpression(ctx.expression())
+            return ce.get_compile_time_type(symbol).getSize()
+        }
+
+        if (ctx instanceof GroupedExpressionContext) {
+            return this.getExpressionSize(ctx.expression())
+        }
+
+        // [ arrayElements? ]
+        if (ctx instanceof ArrayExpressionContext) {
+            if (ctx.arrayElements()) {
+                const elem_size: number = this.getExpressionSize(ctx.arrayElements().expression(0))
+                const array_length: number = ctx.arrayElements().expression().length
+                return elem_size * array_length + 2 // size of array node in vm is 2
+            }
+            return 0
+        }
+    }
+
+
     // arrayElements
     // : expression (COMMA expression)* COMMA?
     // | expression SEMI expression
     visitArrayElements(ctx: ArrayElementsContext) {
+        // get the size required to allocate a placeholder block of contiguous memory for the array on the stack
+        const array_element: ExpressionContext = ctx.expression(0)
+        const array_length: number = ctx.SEMI() 
+                                    ? this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext)) 
+                                    : ctx.expression().length
+        const elementSize: number = this.getExpressionSize(array_element)
+        instrs[wc++] = { tag: "ARRAY_PLACEHOLDER", length: array_length, elementSize: elementSize}
+        
+        // visit the expression to get the values on the OS
         if (ctx.SEMI()) { 
-            // value SEMI length: init an array of this length with all elements of this value
-            const [value, length]: ExpressionContext[] = ctx.expression() // must have 2 values only
-
-            this.visit(value); // push value on OS
-            this.visit(length); // push length on OS
-
-            instrs[wc++] = { tag: "ARRAY_FILL" } // length is only known at runtime
-
+            this.visit(ctx.expression(0)); // push value on OS
+            instrs[wc++] = { tag: "ARRAY_FILL", length: array_length, elementSize: elementSize } // VM: peeks on OS and makes `length - 1` copies of value to contiguous memory 
         } else {
             const expressionArray: ExpressionContext[] = ctx.expression()
-
-            instrs[wc++] = { tag: "ARRAY", length: expressionArray.length } 
-
             // push elements in reverse order onto OS
             for (let i = expressionArray.length - 1; i >= 0; i--) {
                 this.visit(expressionArray[i]);
-                instrs[wc++] = { tag: "ARRAY_ASSIGN_ELEMENT" } // Copy the element to the current SP if returning from a Blockframe/Callframe
             }
-
+            instrs[wc++] = { tag: "ARRAY", length: array_length, elementSize: elementSize } // VM: pops `length` elements from OS and copies to contiguous memory
         }
     }
 
@@ -800,10 +870,11 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         const goto_instruction = { tag: "GOTO", addr: -1 }
         instrs[wc++] = goto_instruction
         
-        let param_list: Symbol[] =  []
+        let param_list: SymbolAndType[] =  []
         for (let i = 0; i < arity; i++) {
             const symbol: string = this.visit(params_ctx.functionParam(i).functionParamPattern().pattern())
-            param_list.push(symbol)
+            const type: CompileTimeType = this.visit(params_ctx.functionParam(i).functionParamPattern().type_())
+            param_list.push([symbol, type])
         }
         log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
 
@@ -853,6 +924,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         let symbol = this.visit(ctx.patternNoTopAlt()) // no instruction, just look up symbol
 
         const type: CompileTimeType = this.visit(ctx.type_());
+        log(`SIZE: ${type.getSize()}`, "LET_STATEMENT")
 
         instrs[wc++] = {
             tag: "STACK_ALLOCATE", 
@@ -921,38 +993,50 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
             switch(type_name) {
                 case "i32":
-                    return new I32Type();
+                    return CompileTimeTypeSentinels.I32;
                 case "f64":
-                    return new F64Type();
-                case "boolean":
-                    return new BooleanType();
+                    return CompileTimeTypeSentinels.F64;
+                case "bool":
+                    return CompileTimeTypeSentinels.Boolean;
                 case "char":
-                    return new CharType();
+                    return CompileTimeTypeSentinels.Char;
                 case "string":
-                    return new StringType();
+                    return CompileTimeTypeSentinels.String;
                 default:
                     break;
             }
         }
 
         if (ctx.tupleType()) { 
-            return new UnitType();
+            return CompileTimeTypeSentinels.Unit;
         }
 
         if (ctx.referenceType()) { // reference
-            return new RefType();
+            return CompileTimeTypeSentinels.Ref;
         }
 
         if (ctx.bareFunctionType()) {
-            // TODO: function type
-            return new CompileTimeType(0);  
+            return this.visit(ctx.bareFunctionType())
         }
 
+        // : LSQUAREBRACKET type_ SEMI expression RSQUAREBRACKET
         if (ctx.arrayType()) {
-            // TODO: array type
+            const length: number = this.getIntegerLiteral((ctx.arrayType().expression().getChild(0) as LiteralExpressionContext))
+            const containedType: CompileTimeType = this.visit(ctx.arrayType().type_())
+            return new ArrayType(containedType, length)
         }
 
-        throw new Error("Compile Error; [CompilerRust::visitTypeNoBounds] Unsupported type.");
+        throw new Error(`Compile Error; [CompilerRust::visitTypeNoBounds] Unsupported type. Found ${ctx.getText()}`);
+    }
+
+    visitBareFunctionType(ctx: BareFunctionTypeContext): CompileTimeType {
+        return ctx.bareFunctionReturnType() 
+                ? this.visit(ctx.bareFunctionReturnType())
+                : CompileTimeTypeSentinels.Unit
+    }
+
+    visitBareFunctionReturnType(ctx: BareFunctionReturnTypeContext): CompileTimeType {
+        return this.visit(ctx.typeNoBounds())
     }
 
     // this default result should NEVER be used

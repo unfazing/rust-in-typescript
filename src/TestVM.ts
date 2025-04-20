@@ -1,5 +1,147 @@
 import { test_VM } from './TestingUtils.js';
 
+
+// test_VM(`
+//     fn main() -> i32 {
+//         let x: &i32 = &1;
+//         let y: i32 = 123;
+//         *x
+//     }
+//     `, 1, "")
+
+// Array
+// Presently this will throw an error as the literal 1 is loaded on a stack addr > the array placeholder addr.
+// test_VM(`
+//     fn main() {
+//         let x: [&i32; 1] = [&1];
+//     }
+//     `, undefined, "")
+
+// ERRORS
+// test_VM(`
+//     fn main() -> string{
+//         let mut arr: [&mut string; 1] = [&mut "123"];
+//         let mut y: string = "456";
+//         arr = [&mut y]; // reassign of an arr
+//         arr[0] = &mut "789"; // set of an arr index
+//         return *arr[0];
+//     }
+//     `, "789", "VM - Assign a &string array and its array elements to new variables")
+
+// ERRORS
+// test_VM(`
+//     fn main() -> i32{
+//         let arr2: [&i32 ; 1] = [&1];
+//         let x: i32 = 123;
+//         arr2 = [&x];
+//         arr2[0] = &456;
+//         *arr2[0] 
+//     }
+//     `, "456", "VM - Assign a &i32 array and its array elements to new variables")
+
+// ERRORS
+// test_VM(`
+//     fn main() -> f64 {
+//         let arr: [&i32; 3] = [&1, &2, &3];
+//         let test: i32 = *arr[2];
+
+//         let arr2: [&f64; 3] = [&1.0, &2.0, &3.0];
+//         let test2: f64 = *arr2[2];
+//         return test2;
+//     }
+//     `, 2.0, "Valid - Moving a dereferenced element in a copy array")
+
+
+
+test_VM(`
+    fn main() -> i32{
+        let mut arr: [i32; 3] = [1, 2, 3];
+        arr[0]
+    }
+    `, 1, "")
+
+
+test_VM(`
+    fn main() -> i32{
+        let mut arr: [i32; 10] = [1 ; 10];
+        let mut arr2: [i32; 10] = arr;
+        let mut arr3: [i32; 10] = arr;
+        return arr3[0];
+    }
+    `, 1, "VM - Move copy arrays multiple times")
+
+test_VM(`
+    fn main() -> string{
+        let mut arr: [string; 1] = ["test"];
+        let mut arr2: [string; 1] = arr;
+        return arr2[0];
+    }
+    `, "test", "VM - Move non-copy array once")
+
+test_VM(`
+    fn main() {
+        let mut arr1: [i32; 3] = [1, 2, 3];
+        let mut arr2: [f64; 3] = [1.0, 2.0, 3.0];
+        let mut arr3: [bool; 3] = [true, false, true];
+        let mut arr4: [string; 3] = ["123", "456", "7"];
+        let mut arr5: [char; 3] = ['1', '2', '3'];
+
+        // arrays of same elements
+        let mut arr6: [i32; 3] = [1 ; 3];
+        let mut arr7: [f64; 3] = [1.0 ; 3];
+        let mut arr8: [bool; 3] = [true ; 3];
+        let mut arr9: [char; 3] = ['1' ; 3];
+    }
+    `, undefined, "VM - Create arrays of basic types")
+
+
+
+test_VM(`
+    fn main() -> i32{
+        let mut arr: [i32 ; 1] = [1];
+        arr = [2]; // reassign of an arr
+        arr[0] = 100; // set of an arr index
+        arr[0]
+    }
+    `, 100, "VM - Assign a i32/&i32 array and its array elements to new variables")
+
+test_VM(`
+    fn main() -> char {
+        let nested_arr1: [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+        let nested_arr2: [[f64; 2]; 2] = [[1.1, 2.2], [3.3, 4.4]];
+        let nested_arr3: [[bool; 2]; 3] = [[true, false], [false, true], [true, true]];
+        let nested_arr4: [[string; 2]; 2] = [["123", "456"], ["789", "0"]];
+        let nested_arr5: [[char; 3]; 2] = [['a', 'b', 'c'], ['x', 'y', 'z']];
+
+        // Uniform nested arrays using semicolon syntax
+        let nested_arr6: [[i32; 2]; 3] = [[1, 2]; 3];
+        let nested_arr7: [[f64; 1]; 2] = [[3.14]; 2];
+        let nested_arr8: [[bool; 1]; 4] = [[true]; 4];
+        let nested_arr9: [[char; 2]; 2] = [['r', 's']; 2];
+        return nested_arr9[0][1];
+    }
+    `, 's', "VM - Create nested arrays of basic types")
+
+test_VM(`
+    fn main() -> i32 {
+        let a: i32 = 1;
+        let b: i32 = 2;
+        let c: i32 = 3;
+
+        let arr: [&i32; 3] = [&a, &b, &c];
+        return *arr[0];
+    }
+    `, 1, "VM - Create arrays of reference types")
+
+
+test_VM(`
+    fn main() {
+        // empty array
+        let mut arr: [i32; 0] = [1 ; 0];
+        let mut arr2: [i32; 0] = [];
+    }
+    `, undefined, "VM - Create empty array")
+
 // No main found
 test_VM(`fn not_main() -> string {}`, undefined, "VM - No Main Function", true);
 test_VM(``, undefined, "VM - Empty Program", true);
