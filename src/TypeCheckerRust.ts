@@ -391,7 +391,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             print_or_throw_error(`Unknown type for literal expression: ${ctx.getText()}`, ctx)
         }
         log(`EXPRESSION: ${ctx.getText()}, HAS TYPE: ${type}`, "LITERAL_EXPRESSION")
-        return new ScalarType(type, undefined) // mutability does not apply to literals, only variables
+        return new ScalarType(type) // mutability does not apply to literals, only variables
     }
 
     // leaf node: returns the type of the symbol (by looking up type env)
@@ -432,7 +432,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         // if we are borrowing from temporary type: let y = &String::from("1");
         // allow mutable borrow even without mut keyword: let y = &mut String::from("1");
-        if ( (!inner_type.IsTemporary) && (is_mut_borrow && !inner_type.IsMutable) ) {
+        if ( (is_mut_borrow && !inner_type.IsMutable) ) {
             print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow to an immutable variable.`, ctx);
         
         } else if (inner_type.MutableBorrowExists) {
@@ -574,7 +574,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         const actual_type: Type = this.visit(RHS);
 
         // TODO: change the default to mutable: true
-        if (!actual_type.IsTemporary && !expected_type.IsMutable) {
+        if (!expected_type.IsMutable) {
             print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.', ctx)
         }
 
@@ -629,7 +629,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             }
 
             if (lhs_scope_depth < rhs_scope_depth) {
-                const line = ctx.start.line;
                 print_or_throw_error(`Type error in assignment; Lifetime of locally assigned reference shorter than variable ${lhs_symbol}.`, ctx)
             }
         }
@@ -987,7 +986,15 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     visitArrayElements(ctx: ArrayElementsContext): Type {
         if (ctx.SEMI()) {
             // all elements are the same - only allowed for copy types
-            const type: Type = this.visit(ctx.expression(0))
+            const value: ExpressionContext = ctx.expression(0)
+            if (!(value instanceof LiteralExpression_Context || 
+                value instanceof PathExpression_Context || 
+                value instanceof BorrowExpressionContext ||  
+                value instanceof ArrayExpressionContext || 
+                value instanceof DereferenceExpressionContext)
+            ) print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${value.getText()}`)
+            
+            const type: Type = this.visit(value)
             if (this.canBeMoved(type)) {
                 print_or_throw_error(`Type error in array elements; ${unparse_type(type)} does not have copy trait, unable to make copies into elements of the array`)
             }
@@ -1003,6 +1010,13 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         let type: Type
         let types: Type[] = []
         for (const expr_ctx of ctx.expression()) {
+            if (!(expr_ctx instanceof LiteralExpression_Context || 
+                expr_ctx instanceof PathExpression_Context || 
+                expr_ctx instanceof BorrowExpressionContext ||  
+                expr_ctx instanceof ArrayExpressionContext || 
+                expr_ctx instanceof DereferenceExpressionContext)
+            ) print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`)
+
             const next_elem_type: Type = this.visit(expr_ctx)
             types.push(next_elem_type)
             if (type === undefined) {
@@ -1097,7 +1111,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
 
         log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
 
-        let ref_type: RefType = is_mut ? new MutableRefType(inner_type, undefined) : new ImmutableRefType(inner_type, undefined);
+        let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
         return ref_type;
     }
 
@@ -1156,10 +1170,6 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
     //     | SEMI
     // )
     // ;
-
-
-    // TODO: a function can only take up to one reference as a param (avoid needing to annotate lifetime)
-    // if returns borrow, check it only take in one ref and is the same
     visitFunction_(ctx: Function_Context): Type {
         function findBorrowParam(expected_param_types: Type[]): Type {
             let borrow_param: Type

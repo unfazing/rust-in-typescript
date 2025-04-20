@@ -198,7 +198,7 @@ export abstract class Type {
     ImmutableBorrowCount: number
 
     constructor() {
-        this.IsMutable = false
+        this.IsMutable = true // default to true to handle temp variables
         this.IsMoved = false
         this.IsTemporary = true
         this.MutableBorrowExists = false
@@ -221,13 +221,12 @@ export abstract class Type {
 }
 
 export class ScalarType extends Type {
-    constructor(typeName: ScalarTypeName, is_mut?: boolean) {
+    constructor(typeName: ScalarTypeName) {
         super()
-        this.IsMutable = is_mut
         this.TypeName = typeName
     }
     clone(): Type {
-        return new ScalarType(this.TypeName as ScalarTypeName, this.IsMutable)
+        return new ScalarType(this.TypeName as ScalarTypeName)
     }
 }
 
@@ -248,9 +247,8 @@ export class ArrayType extends Type {
 
 
 export class UnitType extends Type {
-    constructor(is_mut?: boolean) {
+    constructor() {
         super();
-        this.IsMutable = is_mut;
         this.TypeName = "unit";
     }
 
@@ -295,14 +293,13 @@ export class ClosureType extends Type {
 }
 
 export class StringType extends Type {
-    constructor(is_mut?: boolean) {
+    constructor() {
         super()
-        this.IsMutable = is_mut
         this.TypeName = "string"
     }
 
     clone() {
-        return new StringType(this.IsMutable)
+        return new StringType()
     }
 }
 
@@ -325,42 +322,39 @@ export abstract class RefType extends Type {
 }
 
 export class ImmutableRefType extends RefType {
-    constructor(innerType: Type, is_mut?: boolean, ) {
+    constructor(innerType: Type) {
         super()
         this.InnerType = innerType
-        this.IsMutable = is_mut
     }
 
     clone() {
-        return new ImmutableRefType(this.InnerType.clone(), this.IsMutable)
+        return new ImmutableRefType(this.InnerType.clone())
     }
 }
 
 export class MutableRefType extends RefType {
-    constructor(innerType: Type, is_mut?: boolean, ) {
+    constructor(innerType: Type,) {
         super()
         this.InnerType = innerType
-        this.IsMutable = is_mut
     }
     mark_moved() {
         super.mark_moved()
         this.InnerType.MutableBorrowExists = false
     }
     clone() {
-        return new MutableRefType(this.InnerType.clone(), this.IsMutable)
+        return new MutableRefType(this.InnerType.clone())
     }
 }
 
 export class ReturnType extends Type {
     ReturnedType: Type
-    constructor(returnedType: Type, is_mut?: boolean) {
+    constructor(returnedType: Type) {
         super()
         this.ReturnedType = returnedType
-        this.IsMutable = is_mut
         this.TypeName = "returnType"
     }
     clone() {
-        return new ReturnType(this.ReturnedType.clone(), this.IsMutable)
+        return new ReturnType(this.ReturnedType.clone())
     }
 }
 

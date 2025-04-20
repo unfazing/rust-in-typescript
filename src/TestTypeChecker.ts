@@ -11,145 +11,6 @@ test_typechecker(`
     
     `, "Type error in ClosureType construction; Returned ref must have same type as argument ref.", "Invalid - Function must return the same reference it took in.")
 
-test_typechecker(`
-    fn main() {
-        let mut arr1: [i32; 3] = [1, 2, 3];
-        let mut arr2: [f64; 3] = [1.0, 2.0, 3.0];
-        let mut arr3: [bool; 3] = [true, false, true];
-        let mut arr4: [string; 3] = ["123", "456", "7"];
-        let mut arr5: [char; 3] = ['1', '2', '3'];
-
-        // arrays of same elements
-        let mut arr6: [i32; 3] = [1 ; 3];
-        let mut arr7: [f64; 3] = [1.0 ; 3];
-        let mut arr8: [bool; 3] = [true ; 3];
-        let mut arr9: [char; 3] = ['1' ; 3];
-    }    
-    `, "", "Valid - Create arrays of basic types")
-
-
-test_typechecker(`
-    fn main() {
-        // empty array
-        let mut arr: [i32; 0] = [1 ; 0];
-        let mut arr: [i32; 0] = [];
-    }
-    `, "", "Valid - Create empty arrays")
-
-
-test_typechecker(`
-    fn main() {
-        let mut arr: [i32; 0] = [1 ; 0];
-        let mut arr2: [i32; 0] = arr;
-        let mut arr3: [i32; 0] = arr;
-
-        let mut arr: [string; 1] = ["test"];
-        let mut arr2: [string; 1] = arr;
-    }
-    `, "", "Valid - Move copy arrays multiple times")
-
-test_typechecker(`
-    fn main() {
-        let mut arr: [string; 1] = ["test"];
-        let mut arr2: [string; 1] = arr;
-        let mut arr3: [string; 1] = arr;
-
-    }
-    `, "Type error in pathExpression; use of a moved value: arr", "Invalid - Move non-copy arrays multiple times")
-
-test_typechecker(`
-    fn main() {
-        let arr: [i32 ; 1] = ["10"];
-    }
-    `, "Type error in let statement; Expected type: [i32 ; size 1], actual type: [string ; size 1].", "Invalid - Create array with wrong type")
-
-
-test_typechecker(`
-    fn main() {
-        let arr: [i32 ; 3] = ["10", 10, 1.2];
-    }
-    `, "Type error in array elements; elements of an array must all have same type", "Invalid - Create array with mixed types")
-
-
-test_typechecker(`
-    fn main() {
-        let arr: [i32 ; 1] = [1];
-        arr = [2];
-        arr[0] = 100;
-
-        let arr2: [&i32 ; 1] = [&1];
-        let x: i32 = 123;
-        arr2 = [&x];
-        arr2[0] = &456;
-
-        let arr3: [&mut string; 1] = [&mut "123"];
-        let mut y: string = "456";
-        arr3 = [&mut y];
-        arr3[0] = &mut "789
-    }
-    `, "", "Valid - Assign array and array elements to correct types")
-
-test_typechecker(`
-    fn main() {
-        let nested_arr1: [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
-        let nested_arr2: [[f64; 2]; 2] = [[1.1, 2.2], [3.3, 4.4]];
-        let nested_arr3: [[bool; 2]; 3] = [[true, false], [false, true], [true, true]];
-        let nested_arr4: [[string; 2]; 2] = [["123", "456"], ["789", "0"]];
-        let nested_arr5: [[char; 3]; 2] = [['a', 'b', 'c'], ['x', 'y', 'z']];
-
-        // Uniform nested arrays using semicolon syntax
-        let nested_arr6: [[i32; 2]; 3] = [[1, 2]; 3];
-        let nested_arr7: [[f64; 1]; 2] = [[3.14]; 2];
-        let nested_arr8: [[bool; 1]; 4] = [[true]; 4];
-        let nested_arr10: [[char; 2]; 2] = [['r', 's']; 2];
-    }
-    `, "", "Valid - Create nested arrays of basic types")
-
-test_typechecker(`
-    fn main() {
-        let nested_arr: [[string; 1]; 3] = [["rust"]; 3];
-    }
-    `, "Type error in array elements; [string ; size 1] does not have copy trait, unable to make copies into elements of the array", "Invalid - Create array of string with semicolon syntax")
-    
-
-
-test_typechecker(`
-    fn main() {
-        let a: i32 = 1;
-        let b: i32 = 2;
-        let c: i32 = 3;
-
-        let arr: [&i32; 3] = [&a, &b, &c];
-    }
-    `, "", "Valid - Create arrays of reference types")
-
-
-test_typechecker(`
-    fn main() {
-        let mut str_arr: [string; 3] = ["123" ; 4];
-    }
-    `, "Type error in array elements; string does not have copy trait, unable to make copies into elements of the array", "Invalid - Create nested array of string with semicolon syntax")
-
-
-test_typechecker(`
-    fn main() {
-        let arr: [&i32; 3] = [&1, &2, &3];
-        let test: i32 = *arr[2];
-
-        let arr2: [&f64; 3] = [&1.0, &2.0, &3.0];
-        let test2: f64 = *arr2[2];
-    }
-    `, "", "Valid - Moving a dereferenced element in a copy array")
-
-
-test_typechecker(`
-    fn main() {
-        let arr: [string; 3] = ["1", "2", "3"];
-        let test: string = arr[2];
-    }
-    `, "Type error in let statement; cannot move out of a non-copy array", "Invalid - Move non copy string out of an array")
-            
-
 
 test_typechecker(`
 fn main() -> i32 {
@@ -611,3 +472,159 @@ test_typechecker(`
         let mut z: i32 = *x;
     }
     `, "", "Valid - No Dangling Mutable Reference (Temporary Value Outside Scope)")
+
+
+test_typechecker(`
+    fn main() {
+        let x: i32 = 123;
+        x = 456;
+    }
+    `, "Type error in assignment; tried to assign when variable is immutable.", "Invalid - Reassign to immutable variable")
+
+
+
+// Arrays
+test_typechecker(`
+    fn main() {
+        let mut arr1: [i32; 3] = [1, 2, 3];
+        let mut arr2: [f64; 3] = [1.0, 2.0, 3.0];
+        let mut arr3: [bool; 3] = [true, false, true];
+        let mut arr4: [string; 3] = ["123", "456", "7"];
+        let mut arr5: [char; 3] = ['1', '2', '3'];
+
+        // arrays of same elements
+        let mut arr6: [i32; 3] = [1 ; 3];
+        let mut arr7: [f64; 3] = [1.0 ; 3];
+        let mut arr8: [bool; 3] = [true ; 3];
+        let mut arr9: [char; 3] = ['1' ; 3];
+    }    
+    `, "", "Valid - Create arrays of basic types")
+
+
+test_typechecker(`
+    fn main() {
+        // empty array
+        let mut arr: [i32; 0] = [1 ; 0];
+        let mut arr: [i32; 0] = [];
+    }
+    `, "", "Valid - Create empty arrays")
+
+
+test_typechecker(`
+    fn main() {
+        let mut arr: [i32; 0] = [1 ; 0];
+        let mut arr2: [i32; 0] = arr;
+        let mut arr3: [i32; 0] = arr;
+
+        let mut arr: [string; 1] = ["test"];
+        let mut arr2: [string; 1] = arr;
+    }
+    `, "", "Valid - Move copy arrays multiple times")
+
+test_typechecker(`
+    fn main() {
+        let mut arr: [string; 1] = ["test"];
+        let mut arr2: [string; 1] = arr;
+        let mut arr3: [string; 1] = arr;
+
+    }
+    `, "Type error in pathExpression; use of a moved value: arr", "Invalid - Move non-copy arrays multiple times")
+
+test_typechecker(`
+    fn main() {
+        let arr: [i32 ; 1] = ["10"];
+    }
+    `, "Type error in let statement; Expected type: [i32 ; size 1], actual type: [string ; size 1].", "Invalid - Create array with wrong type")
+
+
+test_typechecker(`
+    fn main() {
+        let arr: [i32 ; 3] = ["10", 10, 1.2];
+    }
+    `, "Type error in array elements; elements of an array must all have same type", "Invalid - Create array with mixed types")
+
+// TODO: should not be able to run this.
+test_typechecker(`
+    fn main() {
+        let mut arr: [i32 ; 1] = [1];
+        arr = [2];
+        arr[0] = 100;
+
+        let mut arr2: [&i32 ; 1] = [&1];
+        let x: i32 = 123;
+        arr2 = [&x];
+        arr2[0] = &456;
+
+        let mut arr3: [&mut string; 1] = [&mut "123"];
+        let mut y: string = "456";
+        arr3 = [&mut y];
+        arr3[0] = &mut "789";
+    }
+    `, "", "Valid - Assign array and array elements to correct types")
+
+test_typechecker(`
+    fn main() {
+        let nested_arr1: [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+        let nested_arr2: [[f64; 2]; 2] = [[1.1, 2.2], [3.3, 4.4]];
+        let nested_arr3: [[bool; 2]; 3] = [[true, false], [false, true], [true, true]];
+        let nested_arr4: [[string; 2]; 2] = [["123", "456"], ["789", "0"]];
+        let nested_arr5: [[char; 3]; 2] = [['a', 'b', 'c'], ['x', 'y', 'z']];
+
+        // Uniform nested arrays using semicolon syntax
+        let nested_arr6: [[i32; 2]; 3] = [[1, 2]; 3];
+        let nested_arr7: [[f64; 1]; 2] = [[3.14]; 2];
+        let nested_arr8: [[bool; 1]; 4] = [[true]; 4];
+        let nested_arr10: [[char; 2]; 2] = [['r', 's']; 2];
+    }
+    `, "", "Valid - Create nested arrays of basic types")
+
+test_typechecker(`
+    fn main() {
+        let nested_arr: [[string; 1]; 3] = [["rust"]; 3];
+    }
+    `, "Type error in array elements; [string ; size 1] does not have copy trait, unable to make copies into elements of the array", "Invalid - Create array of string with semicolon syntax")
+    
+
+
+test_typechecker(`
+    fn main() {
+        let a: i32 = 1;
+        let b: i32 = 2;
+        let c: i32 = 3;
+
+        let arr: [&i32; 3] = [&a, &b, &c];
+    }
+    `, "", "Valid - Create arrays of reference types")
+
+
+test_typechecker(`
+    fn main() {
+        let mut str_arr: [string; 3] = ["123" ; 4];
+    }
+    `, "Type error in array elements; string does not have copy trait, unable to make copies into elements of the array", "Invalid - Create nested array of string with semicolon syntax")
+
+
+test_typechecker(`
+    fn main() {
+        let arr: [&i32; 3] = [&1, &2, &3];
+        let test: i32 = *arr[2];
+
+        let arr2: [&f64; 3] = [&1.0, &2.0, &3.0];
+        let test2: f64 = *arr2[2];
+    }
+    `, "", "Valid - Moving a dereferenced element in a copy array")
+
+
+test_typechecker(`
+    fn main() {
+        let arr: [string; 3] = ["1", "2", "3"];
+        let test: string = arr[2];
+    }
+    `, "Type error in let statement; cannot move out of a non-copy array", "Invalid - Move non copy string out of an array")
+
+test_typechecker(`
+    fn main() {
+        let arr: [&string; 3] = [&"1", &"2", &"3"];
+        let test: string = *arr[2];
+    }
+    `, "Type error in let statement; cannot move a borrowed value", "Invalid - Move a borrowed non copy string out of an array")
