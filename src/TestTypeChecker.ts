@@ -59,7 +59,7 @@ fn main() {
 
 test_typechecker(`
 fn main() -> i32 {
-    fn main() -> bool {
+    fn foo() -> bool {
         return false;
     }
     if (true) {
@@ -190,11 +190,11 @@ test_typechecker(`
 fn main() {
     let x: i32 = 42;
 
-    fn main() -> i32 {
+    fn foo() -> i32 {
         return x; // cannot access dynamic variable outside of fn scope
     }
 
-    main();
+    foo();
 }
 `, "Type error in pathExpression; [lookup_type] Variable x is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
 
@@ -202,13 +202,13 @@ test_typechecker(`
 fn main() {
     let x: i32 = 42;
 
-    fn main() {}
+    fn foo() {}
 
-    fn main() {
-        main(); // can access function names outside of scope
+    fn foo2() {
+        f(); // can access function names outside of scope
     }
 
-    main();
+    foo();
 }
 `, "", "Valid - Lookup Function Name From Outer Scope")
 
@@ -232,7 +232,7 @@ fn main() {
     let x_ref: &i32 = &42;
     let x_ref_2: &mut i32 = &mut (*x_ref); // another immutable borrow alr exists, throw error
 
-    // mfking Rust allows this due to some reborrowing bs (https://haibane-tenshi.github.io/rust-reborrowing/)
+    // Rust allows this due to some reborrowing bs (https://haibane-tenshi.github.io/rust-reborrowing/)
 }
 `, "cannot create a mutable borrow because owner already has an immutable borrow", "Invalid - Mutable Borrow to Temporary Variable (Immutable Borrow Exists)")
 
@@ -290,7 +290,7 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) -> &mut string {
+        fn foo(a: &mut string) -> &mut string {
             return a;
         }
     }
@@ -299,7 +299,7 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) -> &mut string {
+        fn foo(a: &mut string) -> &mut string {
             let new_ref: &mut string = &mut\"123\";
             return new_ref;
         }
@@ -309,7 +309,7 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string, b: &mut string) -> &mut string {
+        fn foo(a: &mut string, b: &mut string) -> &mut string {
             return a;
         }
     }
@@ -317,12 +317,12 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) {
+        fn foo(a: &mut string) {
             return;
         }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        main(x_ref); // move x_ref into function
+        foo(x_ref); // move x_ref into function
         let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
     }
     `, "", "Valid - Re-borrow After Mutable Borrow Ends")
@@ -330,12 +330,12 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) -> &mut string {
+        fn foo(a: &mut string) -> &mut string {
             return a;
         }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        main(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
+        foo(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
         let mut x_ref_2: &mut string = &mut x;
     }
     `, "Type error in pathExpression; use (read/write) of a mutably borrowed value", "Invalid - Simultaneous Mutable Borrows")
@@ -343,23 +343,23 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) -> &mut string {
+        fn foo(a: &mut string) -> &mut string {
             return a;
         }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        x_ref = main(x_ref); // cannot assign to moved value
+        x_ref = foo(x_ref); // cannot assign to moved value
     }
     `, "Type error in assignment; Cannot assign to a moved value.", "Invalid - Reassigning Moved Mutable Reference")
 
 test_typechecker(`
     fn main() {
-        fn main(a: &mut string) -> &mut string {
+        fn foo(a: &mut string) -> &mut string {
             return a;
         }
         let mut x: string = "123";
         let mut x_ref: &mut string = &mut x;
-        main(x_ref); // move x_ref
+        foo(x_ref); // move x_ref
         x_ref = &mut "test"; // use moved value
     }
     `, "Type error in pathExpression; use of a moved value", "Invalid - Use of Moved Mutable Reference After Function Call")
@@ -367,13 +367,13 @@ test_typechecker(`
 
 test_typechecker(`
     fn main() {
-        fn main(a: & string) -> & string {
+        fn foo(a: & string) -> & string {
             return a;
         }
         let x: string = "123";
         let x_ref: & string = & x;
-        main(x_ref); // no move x_ref since immutable ref
-        main(x_ref);
+        foo(x_ref); // no move x_ref since immutable ref
+        foo(x_ref);
     }
     `, "", "Valid - Passing Immutable Reference")
 
@@ -383,10 +383,10 @@ test_typechecker(`
             func(value) + value
         }
 
-        fn main(x: i32) -> i32 {
+        fn foo(x: i32) -> i32 {
             x * 2
         }
-        let result: i32 = apply_function(main, 5);
+        let result: i32 = apply_function(foo, 5);
     }
     `, "", "Valid - Higher-Order Function (i32)")
 
@@ -396,10 +396,10 @@ test_typechecker(`
             func(value) + *value
         }
 
-        fn main(x: &i32) -> i32 {
+        fn foo(x: &i32) -> i32 {
             *x * 2
         }
-        let result: i32 = apply_function(main, &5);
+        let result: i32 = apply_function(foo, &5);
     }
     `, "", "Valid - Higher-Order Function with References")
 

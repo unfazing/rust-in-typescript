@@ -358,6 +358,20 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         te.extend_type_environment(IS_BLOCKTYPEFRAME)
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
 
+        // Scan out only local function declarations and their types
+        for (const item of ctx.item()) {
+            if (item.visItem().function_()) {
+                const fun: Function_Context = item.visItem().function_()
+                const symbol: string = this.visit(fun.identifier());
+                const expected_param_types: Type[] = fun.functionParameters() ? this.visit(fun.functionParameters()) : [];
+                const expected_return_type: Type = fun.functionReturnType() ? this.visit(fun.functionReturnType()) : new UnitType();
+                const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
+                
+                // add symbol binding to type environment
+                te.add_symbol_to_current_frame(symbol, fun_type);
+            }
+        }
+
         log(`TYPE ENVIRONMENT: ${JSON.stringify(te, null, 4)}`, "CRATE")
         this.visitChildren(ctx)
 
@@ -495,19 +509,32 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // : LCURLYBRACE innerAttribute* statements? RCURLYBRACE
     // ;
     visitBlockExpression(ctx: BlockExpressionContext): Type {
-        // Scan out all local declarations and their types
-        // Declarations are:
-        // 1. let statement
-        // 2. constant item
-        // 3. function declaration (function_)
-
         if (!ctx.statements()) {
             return new UnitType();
         }
-
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
         te.extend_type_environment(IS_BLOCKTYPEFRAME);
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
+
+        // Scan out only local function declarations and their types
+        const statements = ctx.statements().statement()
+        for (const stmt of statements) {
+            const is_function_declaration = stmt.item()
+                                            ? stmt.item().visItem()
+                                                ? stmt.item().visItem().function_()
+                                                : true
+                                            : false
+            if (is_function_declaration) {
+                const fun: Function_Context = stmt.item().visItem().function_()
+                const symbol: string = this.visit(fun.identifier());
+                const expected_param_types: Type[] = fun.functionParameters() ? this.visit(fun.functionParameters()) : [];
+                const expected_return_type: Type = fun.functionReturnType() ? this.visit(fun.functionReturnType()) : new UnitType();
+                const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
+                
+                // add symbol binding to type environment
+                te.add_symbol_to_current_frame(symbol, fun_type);
+            }
+        }
 
         // type check each statement in the block.
         // the type of the block is the type of the 
@@ -515,7 +542,6 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         let blockType: Type = new UnitType();
         let returned: boolean = false
 
-        const statements = ctx.statements().statement();
         for (const statement of statements) {
             log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
             blockType = this.visit(statement)
@@ -1195,17 +1221,27 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return borrow_param
         }
 
-        // read type declarations for the function
-        const symbol: string = this.visit(ctx.identifier());
-        const expected_param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : [];
-        const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType();
-        const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
+        // CHANGED: scan out function declarations in block and crate instead of adding to type env in line
+        // // read type declarations for the function
+        // const symbol: string = this.visit(ctx.identifier());
+        // const expected_param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : [];
+        // const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType();
+        // const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
         
-        // add symbol binding to type environment
-        te.add_symbol_to_current_frame(symbol, fun_type);
+        // // add symbol binding to type environment
+        // te.add_symbol_to_current_frame(symbol, fun_type);
 
         // extend the environment to store type mapping for parameters
         te.extend_type_environment(IS_FUNCTIONTYPEFRAME)
+
+        const symbol: string = this.visit(ctx.identifier());
+        let fun_type: Type = te.lookup_type(symbol)
+        if (!(fun_type instanceof ClosureType)) {
+            print_or_throw_error(`Type error in function declaration; looked up symbol scanned '${symbol}' declaration and did not find a function type.`)
+        } 
+
+        const expected_param_types: Type[] = (fun_type as ClosureType).ParamTypes
+        const expected_return_type: Type = (fun_type as ClosureType).ReturnType
 
         // push the return type of the function to the stack
         returnTypeStack = push(returnTypeStack, expected_return_type); 

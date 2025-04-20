@@ -65,7 +65,7 @@ export class TypeEnvironment {
                 const type_found: Type = this.type_environment[i].frame[x] 
                 if (must_be_closure && !(type_found instanceof ClosureType)) {
                     print_or_throw_error(`Type error in pathExpression; [lookup_type] Variable ${x} is from an outer scope.`)
-                    return undefined;
+                    return;
                 }
                 return type_found
             }
@@ -82,7 +82,6 @@ export class TypeEnvironment {
         }
 
         print_or_throw_error(`Type error in pathExpression; [lookup_type] Unbound variable ${x}.`)
-        return undefined;
     }
 
     // extend the environment destructively 
