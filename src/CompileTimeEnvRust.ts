@@ -154,3 +154,67 @@ export type Symbol = string
 // export const global_compile_environment = [global_compile_frame];
 
 export const global_compile_environment: CompileTimeEnvironment = new CompileTimeEnvironment();
+
+export class CompileTimeType {
+	size: number;
+
+	constructor(size: number) {
+		this.size = size;
+	}
+
+	getSize(): number {
+		return this.size;
+	}
+}
+
+// Subclasses for each Rust type
+export class BooleanType extends CompileTimeType {
+	constructor() {
+		super(1);
+	}
+}
+
+export class UnitType extends CompileTimeType {
+	constructor() {
+		super(1);
+	}
+}
+
+export class I32Type extends CompileTimeType {
+	constructor() {
+		super(2);
+	}
+}
+
+export class F64Type extends CompileTimeType {
+	constructor() {
+		super(2);
+	}
+}
+
+export class CharType extends CompileTimeType {
+	constructor() {
+		super(2);
+	}
+}
+
+export class StringType extends CompileTimeType {
+	constructor() {
+		super(2);
+	}
+}
+
+export class RefType extends CompileTimeType {
+	constructor() {
+		super(2);
+	}
+}
+
+export class ClosureType extends CompileTimeType {
+	returnType: CompileTimeType // we only care about returnType to check type of first elem in [f(), 2, 3] 
+	constructor() {
+		super(2);
+	}
+}
+
+

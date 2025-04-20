@@ -1,6 +1,7 @@
 import { assert, error } from "console";
 import { builtin_array, primitive_object } from "./CompileTimeEnvRust";
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, RustValue, StringRustValue, UnitRustValue } from "./Utils";
+import { start } from "repl";
 
 
 const LOGGING_ENABLED = false;
@@ -108,6 +109,8 @@ class Stack {
 	// public FALSE: number;
 	// public UNIT: number;
 	public UNASSIGNED: number;
+
+	private temps_marker_stack = [] // stack of addresses to pop all temp variables
 
 	constructor(bytes: number, starting_address: number) {
 		if (bytes % word_size !== 0) 
@@ -229,14 +232,8 @@ class Stack {
 		}
 		
 		const target_size: number = this.get_size(target_addr);
-		const dest_size: number = this.get_size(destination_addr);
-
-		// this should be handled by the Typechecker! Cannot assign a different type to a variable
-		if (dest_size !== target_size) {
-			throw new Error("Runtime Error; [STACK::shallow_copy] Cannot copy more or fewer words than the size of the destination node.")
-		}
-
-		// copy words as raw 64-bit chunks
+		
+		// copy words as raw 64-bit (8 bytes) chunks
 		for (let i = 0; i < target_size; i++) {
 			
 			// Read and write raw bits (no type interpretation)
@@ -246,8 +243,8 @@ class Stack {
 	}
 
 	/**
-	 * Allocate a new node on the current stack frame of the same size as the target node.
-	 * Then copy the target node over to the destination address.
+	 * Allocate a new node at current SP with the same size as the target node.
+	 * Then copy the target node over to this newly allocated address.
 	 * 
 	 * @param target_address 
 	 * @returns 
@@ -599,7 +596,7 @@ class Stack {
 			throw new Error("Runtime Error; [STACK::pop_Callframe] FP is not pointed to a call frame.")
 		}
 
-		this.free_heap_allocated_memory();
+		this.free_heap_allocated_memory(this.FP);
 
 		this.SP = this.FP;
 		this.FP = this.get_Callframe_FP();
@@ -649,7 +646,7 @@ class Stack {
 			throw new Error("Runtime Error; [STACK::pop_Blockframe] FP is not pointed to a block frame.")
 		}
 
-		this.free_heap_allocated_memory();
+		this.free_heap_allocated_memory(this.FP);
 
 		this.SP = this.FP;
 		this.FP = this.get_Blockframe_FP();
@@ -660,13 +657,13 @@ class Stack {
 	 * to free heap-allocated nodes pointed to by
 	 * valid (unmoved) stack pointers
 	 */
-	free_heap_allocated_memory() {
+	free_heap_allocated_memory(starting_addr: number) {
 
 		// the address of the OS is the object we are moving out of scope!
 		const address_on_OS = peek(OS, 0); 
 		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
 		
-		let addr = this.FP
+		let addr = starting_addr;
 		while (addr < this.SP) {
 			// console.log(`[STACK::pop_Blockframe] Visiting stack addr ${addr}, tag: ${this.tag_to_string(STACK.get_tag(addr))}`)
 			if (this.is_heap_allocated_type(addr) && !this.is_moved(addr)) {
@@ -752,6 +749,16 @@ class Stack {
 	get_Array_stride(address): number {
 		return this.get_4_bytes_at_offset(address + 1, 4);
 	}
+
+	allocate_Temp_marker() {
+		this.temps_marker_stack.push(this.SP);
+	}
+
+	cleanup_Temps() {
+		const marker: number = this.temps_marker_stack.pop();
+		this.free_heap_allocated_memory(marker); // deallocate any heap temps
+		this.SP = marker; // pop stack temps
+	}
 }
 
 class Heap {
@@ -790,12 +797,14 @@ class Heap {
 		// console.log(`[freeMem] Freed Memory of ${address} Tag: ${tagMap[(HEAP.getTag(address))]}`)
 		
 		// Leave string heap nodes to free at the end of programme execution
-		if (HEAP.getTag(address) !== String_tag) {
-			this.n_nodes_used--
-			this.n_nodes_freed++
-			this.set(address, this.free)
-			this.free = address
+		if (HEAP.getTag(address) === String_tag) {
+			return;
 		}
+
+		this.n_nodes_used--
+		this.n_nodes_freed++
+		this.set(address, this.free)
+		this.free = address
 	}
 
 	freeStringMem(address: number) {
@@ -1612,61 +1621,72 @@ const microcode = {
 
 		push(OS, addr); 
 	},
-	ASSIGN: (instr) => {
-		// e.g, LHS = RHS
+	STACK_ALLOCATE: (instr) => {
+		const address = STACK.allocate(Unassigned_tag, instr.size);
+		HEAP.setEnvValue(E, instr.pos, address);
 
+		// create marker to pop temp operands later
+		STACK.allocate_Temp_marker();
+	}, 
+	COPY_OR_MOVE: (instr) => {
 		const RHS_address = OS.pop();
-		const LHS_address = HEAP.getEnvValue(E, instr.pos);
-		const lhs_tag = STACK.get_tag(LHS_address)
+		const LHS_address = HEAP.getEnvValue(E, instr.pos); // allocated position for this variable on the stack
 
-		if (!is_stack_address(LHS_address) || !is_stack_address(RHS_address)) {
-			throw new Error("Runtime Error; [instr: ASSIGN] Assignment must be done on the stack, never the heap")
+		if (!STACK.compare_tag(LHS_address, Unassigned_tag)) { // Sanity check
+			throw new Error("Runtime Error; [instr: COPY_OR_MOVE] LHS must be unassigned during let/const declaration.")
 		} 
-
-		// Implementing COPY trait
-
-		if (STACK.is_Unassigned(LHS_address)) {
-			// LHS variable is unassigned (after a block scan)
-			// we initialize a new address to the variable now.
-
-			// create a copy in the current stack frame
-			//
-			// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
-			// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
-			const copy_addr = STACK.create_copy(RHS_address);
-
-			// update the env frame address of LHS 
-			// (since it points to UNASSIGNED node previously)
-			HEAP.setEnvValue(E, instr.pos, copy_addr) 
-
-		} else {
-
-			// this means the variable was already initialized. 
-
-			// we can safely deallocate old heap object pointed to by LHS
-			// because the typechecker enforces that this object has no 
-			// dangling references by the time an assignmnent happens
-			if (STACK.is_heap_allocated_type(LHS_address)) {
-				const heap_addr = STACK.get_heap_allocated_address(LHS_address);
-				HEAP.freeMem(heap_addr);			
-			}
-			
-			// We should perform shallow copy from RHS to LHS, since 
-			// RHS value may go out of scope.
-			STACK.shallow_copy(LHS_address, RHS_address);
-		}
+		
+		STACK.shallow_copy(LHS_address, RHS_address);
 
 		if (STACK.is_heap_allocated_type(RHS_address)) {
-
 			// Implementing MOVE trait
 			STACK.mark_moved(RHS_address);			
 		}
+
+		// POP temp values
+		STACK.cleanup_Temps()
 
 		// finally, push unit value on OS, 
 		// because an assignment expression 
 		// always has Unit value in Rust
 		push(OS, STACK.allocate_Unit())
+	},
+	ASSIGN_MARKER: (instr) => {
+		STACK.allocate_Temp_marker();
+	},
+	ASSIGN: (instr) => {
+		// e.g, LHS = RHS
 
+		const RHS_address = OS.pop();
+		const LHS_address = HEAP.getEnvValue(E, instr.pos); // allocated position for this variable on the stack
+
+		if (!is_stack_address(LHS_address) || !is_stack_address(RHS_address)) {
+			throw new Error("Runtime Error; [instr: ASSIGN] Assignment must be done on the stack, never the heap")
+		} 
+
+		// we can safely deallocate old heap object pointed to by LHS
+		// because the typechecker enforces that this object has no 
+		// dangling references by the time an assignmnent happens
+		if (STACK.is_heap_allocated_type(LHS_address)) {
+			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
+			HEAP.freeMem(heap_addr);			
+		}
+		
+		// We should perform shallow copy from RHS to LHS, since 
+		// RHS value may go out of scope.
+		STACK.shallow_copy(LHS_address, RHS_address);
+		
+		if (STACK.is_heap_allocated_type(RHS_address)) {
+			// Implementing MOVE trait
+			STACK.mark_moved(RHS_address);			
+		}
+
+		STACK.cleanup_Temps()
+
+		// finally, push unit value on OS, 
+		// because an assignment expression 
+		// always has Unit value in Rust
+		push(OS, STACK.allocate_Unit())
 	},
 	ASSIGN_DEREF: (instr) => {
 		// eg. *x = y;
@@ -1677,42 +1697,24 @@ const microcode = {
 
 		// Proceed with normal assignment
 
-		// Implementing COPY trait
-
-		if (STACK.is_Unassigned(LHS_address)) {
-			// LHS variable is unassigned (after a block scan)
-			// we initialize a new address to the variable now.
-
-			// create a copy in the current stack frame
-			//
-			// WE DONT ALLOW INITIALIZING A VARIABLE WITHOUT A VALUE
-			// HENCE CAN SAFELY ALLOCATE THE COPY ON THE CURRENT STACK FRAME
-			const copy_addr = STACK.create_copy(RHS_address);
-
-			// set the heap address to that copy
-			HEAP.setEnvValue(E, instr.pos, copy_addr) 
-
-		} else {
-
-			// this means the variable was already initialized. 
-
-			// we can safely deallocate old heap object because the typechecker
-			// enforces that this object has no dangling references by now
-			if (STACK.is_heap_allocated_type(LHS_address)) {
-				const heap_addr = STACK.get_heap_allocated_address(LHS_address);
-				HEAP.freeMem(heap_addr);			
-			}
-
-			// We should perform shallow copy from RHS to LHS, since 
-			// RHS value may go out of scope.
-			STACK.shallow_copy(LHS_address, RHS_address);
+		// we can safely deallocate old heap object pointed to by LHS
+		// because the typechecker enforces that this object has no 
+		// dangling references by the time an assignmnent happens
+		if (STACK.is_heap_allocated_type(LHS_address)) {
+			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
+			HEAP.freeMem(heap_addr);			
 		}
-
+		
+		// We should perform shallow copy from RHS to LHS, since 
+		// RHS value may go out of scope.
+		STACK.shallow_copy(LHS_address, RHS_address);
+		
 		if (STACK.is_heap_allocated_type(RHS_address)) {
-
 			// Implementing MOVE trait
 			STACK.mark_moved(RHS_address);			
 		}
+
+		STACK.cleanup_Temps()
 
 		// finally, push unit value on OS, 
 		// because an assignment expression 
@@ -1723,8 +1725,13 @@ const microcode = {
 		const closure_address = STACK.allocate_Closure(instr.arity, instr.addr, E);
 		push(OS, closure_address);
 	},
+	ASSIGN_FN: (instr) => {
+		const fn_addr = OS.pop();
+		HEAP.setEnvValue(E, instr.pos, fn_addr);
+		push(OS, STACK.allocate_Unit())
+	},
 	CALL: (instr) => {
-		const arity = instr.arity;heap_Environment_display
+		const arity = instr.arity;
 		const fun = peek(OS, arity); // an address to a closure, either built-in or user-defined
 
 		if (STACK.compare_tag(fun, Builtin_tag)) {
@@ -1806,37 +1813,37 @@ const microcode = {
 
 		STACK.pop_Callframe(); 
 	},
-	ARRAY: (instr) => {
+	// ARRAY: (instr) => {
 
-		let stride = 0;
+	// 	let stride = 0;
 
-		// calculate stride: the byte difference between elements in the array
-		if (instr.length > 0) {
-			const first_element = peek(OS, 0)
-			if (STACK.compare_tag(first_element, Array_tag)) {
-				stride = STACK.get_size(first_element) + STACK.get_Array_len(first_element) * STACK.get_Array_stride(first_element);
-			} else {
-				stride = STACK.get_size(first_element);
-			}
-		}
+	// 	// calculate stride: the byte difference between elements in the array
+	// 	if (instr.length > 0) {
+	// 		const first_element = peek(OS, 0)
+	// 		if (STACK.compare_tag(first_element, Array_tag)) {
+	// 			stride = STACK.get_size(first_element) + STACK.get_Array_len(first_element) * STACK.get_Array_stride(first_element);
+	// 		} else {
+	// 			stride = STACK.get_size(first_element);
+	// 		}
+	// 	}
 
-		const array_addr = STACK.allocate_Array(instr.length, stride)
+	// 	const array_addr = STACK.allocate_Array(instr.length, stride)
 
-		for (let i = 0; i < instr.length; i++) {
-			const element_addr = OS.pop()
+	// 	for (let i = 0; i < instr.length; i++) {
+	// 		const element_addr = OS.pop()
 
-			// These elements are not necessarily in contiguous order.
-			// Hence, must copy their values over to the current position in stack frame
-			STACK.create_copy(element_addr)
+	// 		// These elements are not necessarily in contiguous order.
+	// 		// Hence, must copy their values over to the current position in stack frame
+	// 		STACK.create_copy(element_addr)
 
-			if (STACK.is_heap_allocated_type(element_addr)) {
-				// Implementing MOVE trait
-				STACK.mark_moved(element_addr);			
-			}
-		}
+	// 		if (STACK.is_heap_allocated_type(element_addr)) {
+	// 			// Implementing MOVE trait
+	// 			STACK.mark_moved(element_addr);			
+	// 		}
+	// 	}
 
-		push(OS, array_addr);
-	},
+	// 	push(OS, array_addr);
+	// },
 };
 
 const heap_Environment_display = (env_address) => {

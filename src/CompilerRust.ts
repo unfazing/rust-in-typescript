@@ -229,7 +229,7 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { CompileTimeEnvFrame, CompileTimeEnvironment, global_compile_environment, Symbol } from './CompileTimeEnvRust.js';
+import { BooleanType, CharType, CompileTimeEnvFrame, CompileTimeEnvironment, CompileTimeType, F64Type, global_compile_environment, I32Type, RefType, StringType, Symbol, UnitType } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
 
@@ -510,6 +510,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // expression EQ expression
     visitAssignmentExpression(ctx: AssignmentExpressionContext): undefined {
         
+        instrs[wc++] = {
+            tag: "ASSIGN_MARKER", 
+        };
+
         // evaluate/compile RHS 
         // push the address on the OS
         let RHS: ExpressionContext = ctx.expression(1)
@@ -600,12 +604,14 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         } else {
             const expressionArray: ExpressionContext[] = ctx.expression()
 
+            instrs[wc++] = { tag: "ARRAY", length: expressionArray.length } 
+
             // push elements in reverse order onto OS
             for (let i = expressionArray.length - 1; i >= 0; i--) {
                 this.visit(expressionArray[i]);
+                instrs[wc++] = { tag: "ARRAY_ASSIGN_ELEMENT" } // Copy the element to the current SP if returning from a Blockframe/Callframe
             }
 
-            instrs[wc++] = { tag: "ARRAY", length: expressionArray.length }
         }
     }
 
@@ -772,14 +778,16 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     //     | SEMI
     // )
     // ;
-    visitFunction_ (ctx: Function_Context): undefined {
+    visitFunction_(ctx: Function_Context): undefined {
         let symbol = this.visit(ctx.identifier())
         let params = ctx.functionParameters()
         let body = ctx.blockExpression()
         log(`SYMBOL: ${symbol}`, "FUNCTION")
+
         this.insertClosure(params, body)
+
         instrs[wc++] = {
-            tag: "ASSIGN", // immutable assign
+            tag: "ASSIGN_FN", 
             pos: ce.compile_time_environment_position(symbol),
         };
     }
@@ -788,14 +796,17 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`<<< INSERTING CLOSURE >>>`, "FUNCTION->CLOSURE")
         let arity = params_ctx == null || params_ctx.functionParam() == null ? 0 : params_ctx.functionParam().length
         instrs[wc++] = { tag: "LDF", arity: arity, addr: wc + 1}
+
         const goto_instruction = { tag: "GOTO", addr: -1 }
         instrs[wc++] = goto_instruction
+        
         let param_list: Symbol[] =  []
         for (let i = 0; i < arity; i++) {
             const symbol: string = this.visit(params_ctx.functionParam(i).functionParamPattern().pattern())
             param_list.push(symbol)
         }
         log(`PARAM LIST: ${param_list}`, "FUNCTION->CLOSURE")
+
         ce.compile_time_environment_extend(new CompileTimeEnvFrame(param_list))
 
         // compile body into instructions
@@ -839,13 +850,23 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // : outerAttribute* KW_LET patternNoTopAlt (COLON type_)? (EQ expression)? SEMI
     // ;
     visitLetStatement(ctx: LetStatementContext): string {
-        let symbol = this.visit(ctx.patternNoTopAlt())  // no instruction, just look up symbol
-        let expr = this.visit(ctx.expression())         // add LOAD instruction to push to OS
-        log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
-        log(`EXPR: ${expr}`, "LET_STATEMENT")
-        
+        let symbol = this.visit(ctx.patternNoTopAlt()) // no instruction, just look up symbol
+
+        const type: CompileTimeType = this.visit(ctx.type_());
+
         instrs[wc++] = {
-            tag: "ASSIGN", 
+            tag: "STACK_ALLOCATE", 
+            pos: ce.compile_time_environment_position(symbol),
+            size: type.getSize()
+        };
+
+        this.visit(ctx.expression()) // load expression address onto OS
+        
+        log(`SYMBOL: ${symbol}`, "LET_STATEMENT")
+        log(`EXPR: ${ctx.expression()}`, "LET_STATEMENT")
+
+        instrs[wc++] = {
+            tag: "COPY_OR_MOVE", 
             pos: ce.compile_time_environment_position(symbol),
         };
         
@@ -857,12 +878,22 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // ;
     visitConstantItem(ctx: ConstantItemContext): undefined {
         let symbol = this.visit(ctx.identifier())
-        let expr = this.visit(ctx.expression())
+
+        const type: CompileTimeType = this.visit(ctx.type_());
+
+        instrs[wc++] = {
+            tag: "STACK_ALLOCATE", 
+            pos: ce.compile_time_environment_position(symbol),
+            size: type.getSize()
+        };
+
+        this.visit(ctx.expression()) // load expression address onto OS
+
         log(`SYMBOL: ${symbol}`, "CONSTANT_ITEM")
-        log(`EXPR: ${expr}`, "CONSTANT_ITEM")
+        log(`EXPR: ${ctx.expression()}`, "CONSTANT_ITEM")
         
         instrs[wc++] = {
-            tag: "ASSIGN", // immutable assign
+            tag: "COPY_OR_MOVE", 
             pos: ce.compile_time_environment_position(symbol),
         };
     }
@@ -878,11 +909,55 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         return ctx.getText();
     }
 
+    visitWildcardPattern(ctx: WildcardPatternContext) {
+        return "_"
+    }
 
+    // ------------------------------ TYPE ---------------------------------------------
+    
+    visitTypeNoBounds(ctx: TypeNoBoundsContext): CompileTimeType {
+        if (ctx.traitObjectTypeOneBound()) { // primitive type
+            const type_name: string = this.visitChildren(ctx)
 
-    // Override the default result method from AbstractParseTreeVisitor
+            switch(type_name) {
+                case "i32":
+                    return new I32Type();
+                case "f64":
+                    return new F64Type();
+                case "boolean":
+                    return new BooleanType();
+                case "char":
+                    return new CharType();
+                case "string":
+                    return new StringType();
+                default:
+                    break;
+            }
+        }
+
+        if (ctx.tupleType()) { 
+            return new UnitType();
+        }
+
+        if (ctx.referenceType()) { // reference
+            return new RefType();
+        }
+
+        if (ctx.bareFunctionType()) {
+            // TODO: function type
+            return new CompileTimeType(0);  
+        }
+
+        if (ctx.arrayType()) {
+            // TODO: array type
+        }
+
+        throw new Error("Compile Error; [CompilerRust::visitTypeNoBounds] Unsupported type.");
+    }
+
+    // this default result should NEVER be used
     protected defaultResult(): string {
-        return instrs.map(obj => JSON.stringify(obj)).join("\n ");
+        return "SHOULD NOT USE THIS RESULT";
     }
     
     // Override the aggregate result method
