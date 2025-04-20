@@ -355,7 +355,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     }
 
     print_or_throw_error(msg: string, ctx: ParserRuleContext) {
-        const line_info = `[Line: ${ctx.start.line - 1}] `
+        const line_info = `[Line: ${ctx.start.line}] ` // this line appears to be +1 when run locally, but is correct when using conductor
         if (this.logging_enabled) {
             console.error("[!!!!!ERROR] " + msg)
         } else {
@@ -475,7 +475,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // Scan out only local function declarations and their types
         for (const item of ctx.item()) {
             if (item.visItem() === null) {
-                this.print_or_throw_error(`Type error; Unknown item ${item.getText()}`, ctx)
+                this.print_or_throw_error(`Parsing error; Unknown item ${item.getText()}`, item)
             }
             if (item.visItem().function_()) {
                 const fun: Function_Context = item.visItem().function_()
