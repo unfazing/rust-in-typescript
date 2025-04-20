@@ -141,7 +141,7 @@ export class TypeEnvironment {
         for (let i = this.type_environment.length - 1; i >= 0; i--) {
             const frame = this.type_environment[i];
             const frameType = frame instanceof FunctionTypeFrame ? "Function Frame" : "Block Frame";
-            output += `[Depth ${i + 1}] ${frameType}: ${frame.annotation}:\n`;
+            output += `[Depth ${i + 1}] ${frameType}: ${frame.annotation}\n`;
             if (Object.keys(frame.frame).length === 0) {
                 output += "  (empty)\n";
             } else {

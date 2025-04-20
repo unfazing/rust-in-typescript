@@ -400,7 +400,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
 
 
     add_to_type_env_visualisation(ctx: ParserRuleContext, point: VisualisationPoints, info: string) {
-        const line_no: number = ctx.start.line - 1
+        const line_no: number = ctx.start.line
         const line_str: string = `[Line: ${line_no}] `
         let info_str: string = ""
         info_str += line_str
@@ -474,6 +474,9 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
 
         // Scan out only local function declarations and their types
         for (const item of ctx.item()) {
+            if (item.visItem() === null) {
+                this.print_or_throw_error(`Type error; Unknown item ${item.getText()}`, ctx)
+            }
             if (item.visItem().function_()) {
                 const fun: Function_Context = item.visItem().function_()
                 const symbol: string = this.visit(fun.identifier());
@@ -625,7 +628,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return new UnitType();
         }
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
-        this.te.extend_type_environment(IS_BLOCKTYPEFRAME, "VISIT A BLOCK");
+        this.te.extend_type_environment(IS_BLOCKTYPEFRAME, "");
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
 
         // Scan out only local function declarations and their types
