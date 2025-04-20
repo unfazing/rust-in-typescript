@@ -228,19 +228,13 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { ArrayType, ClosureType, compare_type, compare_types, global_type_environment, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
+import { ArrayType, ClosureType, compare_type, compare_types, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
 import { LOGGING_ENABLED } from "./TestingUtils.js";
 
 export class RustTypeChecker {
-    private root: ParseTree;
-    private visitor: TypeCheckerVisitor;
-
-    constructor() {
-        this.visitor = new TypeCheckerVisitor();
-    }
-
     check(tree: ParseTree): undefined {
-        this.visitor.visit(tree);
+        const typechecker = new TypeCheckerVisitor()
+        typechecker.visit(tree);
     }
 }
 
@@ -338,7 +332,7 @@ export function print_or_throw_error(msg: string, ctx?: ParserRuleContext) {
 // Because the lifetime of the literalExpression is the same as the borrow.
 
 
-let te: TypeEnvironment = global_type_environment // an array of frame objects that map symbol to type
+let te: TypeEnvironment // an array of frame objects that map symbol to type
 let returnTypeStack: Type[] = [] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
 const IS_BLOCKTYPEFRAME = true
 const IS_FUNCTIONTYPEFRAME = false
@@ -347,7 +341,16 @@ const IS_FUNCTIONTYPEFRAME = false
 // Usually, visiting all the way to leaf nodes returns Type object (Tyoe defined in RustTypeEnv.ts)
 // The only leaf node that returns string is 'Identifier'
 // The 'IdentifierPattern' node will return a [boolean, string] tuple, representing is_mut and symbol name.
-class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
+export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
+
+    constructor() {
+        super();
+
+        // initialize global variables
+        te = new TypeEnvironment()
+        returnTypeStack = [] 
+    }
+
     // entry node
     visitCrate(ctx: CrateContext) {
         

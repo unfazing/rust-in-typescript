@@ -229,37 +229,10 @@ import { MacroPunctuationTokenContext } from "./parser/src/RustParser.js";
 import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
-import { ArrayType, CompileTimeEnvFrame, CompileTimeEnvironment, CompileTimeType, CompileTimeTypeSentinels, global_compile_environment, SymbolAndType } from './CompileTimeEnvRust.js';
+import { ArrayType, CompileTimeEnvFrame, CompileTimeEnvironment, CompileTimeType, CompileTimeTypeSentinels, SymbolAndType } from './CompileTimeEnvRust.js';
 import { error } from 'console';
 import { BooleanFalseRustValue, BooleanRustValue, BooleanTrueRustValue, CharRustValue, F64RustValue, I32RustValue, StringRustValue, UnitRustValue } from './Utils.js';
-import { createContext } from "vm";
 
-// wc: write counter
-let wc;
-
-// instrs: instruction array
-let instrs;
-
-let ce: CompileTimeEnvironment;
-
-export class RustCompiler {
-    private visitor: RustEvaluatorVisitor;
-
-    constructor() {
-        this.visitor = new RustEvaluatorVisitor();
-    }
-
-    compile(tree: ParseTree): object[] {
-        // reset with every run
-        wc = 0
-        instrs = []
-        ce = global_compile_environment
-
-        return this.visitor.visit(tree);
-    }
-}
-
-// const LOGGING_ENABLED = true; // Set to false to disable logging
 const LOGGING_ENABLED = false; // Set to false to disable logging
 function log(message: any, enclosing_function: string): void {
     if (LOGGING_ENABLED) {
@@ -267,7 +240,28 @@ function log(message: any, enclosing_function: string): void {
     }
 }
 
+export class RustCompiler {
+
+    compile(tree: ParseTree): object[] {
+        const compilerVisitor = new RustEvaluatorVisitor();
+        return compilerVisitor.visit(tree);
+    }
+}
+
+let wc;
+let instrs;
+let ce: CompileTimeEnvironment;
+
 export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
+
+    constructor() {
+        super();
+
+        wc = 0
+        instrs = []
+        ce = new CompileTimeEnvironment()
+    }
+
     // entry node
     visitCrate (ctx: CrateContext): object[] {
         // scan out local declarations in the global frame

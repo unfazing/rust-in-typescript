@@ -178,7 +178,7 @@ export class BlockTypeFrame extends TypeFrame {
 
 // Type environment is a stack implemented with array 
 const empty_type_environment = []
-export const global_type_environment: TypeEnvironment = new TypeEnvironment()
+// export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
 export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array"

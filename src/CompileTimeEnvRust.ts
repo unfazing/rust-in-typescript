@@ -165,7 +165,7 @@ export type Symbol = string
 // const global_compile_frame = Object.keys(primitive_object);
 // export const global_compile_environment = [global_compile_frame];
 
-export const global_compile_environment: CompileTimeEnvironment = new CompileTimeEnvironment();
+// export const global_compile_environment: CompileTimeEnvironment = new CompileTimeEnvironment();
 
 // // Refers to the size of the nodes in the VM
 // export enum CompileTimeType {
