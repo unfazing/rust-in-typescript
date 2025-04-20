@@ -594,6 +594,12 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
             // no need to check if Immutable borrow exists.
         
         } else {
+            if (LHS instanceof IndexExpressionContext) {
+                const arrayType: Type = this.visit(LHS.expression(0))
+                if (!arrayType.IsMutable) {
+                    print_or_throw_error("Type error in assignment; cannot assign to an element in an immutable array", ctx);
+                }
+            }
             // LHS is not a deref expresssion; Hence LHS cannot have any live references before assignment
             if (expected_type.ImmutableBorrowCount > 0 || expected_type.MutableBorrowExists) {
                 print_or_throw_error(`Type error in assignment; cannot assign to a borrowed value: ${unparse_type(expected_type)}`, ctx);
@@ -1038,6 +1044,7 @@ class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustPa
         if (!(array_type instanceof ArrayType)) {
             print_or_throw_error(`Type error in index expression; Attempting to index a variable of type ${unparse_type(array_type)}`, ctx)
         }
+
         return (array_type as ArrayType).ContainedTypes[index]
     }
 

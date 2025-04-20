@@ -543,7 +543,6 @@ test_typechecker(`
     }
     `, "Type error in array elements; elements of an array must all have same type", "Invalid - Create array with mixed types")
 
-// TODO: should not be able to run this.
 test_typechecker(`
     fn main() {
         let mut arr: [i32 ; 1] = [1];
@@ -561,6 +560,13 @@ test_typechecker(`
         arr3[0] = &mut "789";
     }
     `, "", "Valid - Assign array and array elements to correct types")
+
+test_typechecker(`
+    fn main() {
+        let arr: [i32 ; 1] = [1];
+        arr[0] = 100;
+    }
+    `, "Type error in assignment; cannot assign to an element in an immutable array", "Invalid - Assign array element when array is immutable")  
 
 test_typechecker(`
     fn main() {
