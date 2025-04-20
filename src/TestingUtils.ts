@@ -2,15 +2,18 @@ import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustCompiler } from './CompilerRust.js';
-import { RustTypeChecker } from './TypeCheckerRust.js';
+import { RustTypeChecker, VisualisationPoints } from './TypeCheckerRust.js';
 import { RustVirtualMachine } from './VirtualMachineRust.js';
 
 export let LOGGING_ENABLED = false;
-export const test_typechecker = (code: string, expected_error: string, testName?: string, enable_log?: boolean) => {
+export const test_typechecker = (code: string, expected_error: string, testName?: string, enable_log?: boolean, vis_points?: VisualisationPoints) => {
+    if (vis_points === undefined) {
+        vis_points = VisualisationPoints.NONE
+    }
+    
     console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
     console.log(`Code: ${code}`);
     if (enable_log) {
-        LOGGING_ENABLED = true;
         console.log(`Enable logging for test case: ${code}`)
 
         console.log(`Start of log....`)
@@ -25,11 +28,11 @@ export const test_typechecker = (code: string, expected_error: string, testName?
         
         // Typechecker
         const typeChecker = new RustTypeChecker();
-        typeChecker.check(tree);
+        typeChecker.check(tree, enable_log);
+        console.log(typeChecker.getVisualisation(vis_points))
 
         console.log(`...End of log.\n\n`)
 
-        LOGGING_ENABLED = false;
         return; // terminate 
     }
 
@@ -44,7 +47,8 @@ export const test_typechecker = (code: string, expected_error: string, testName?
         
         // Typechecker
         const typeChecker = new RustTypeChecker();
-        typeChecker.check(tree);
+        typeChecker.check(tree, false);
+        console.log(typeChecker.getVisualisation(vis_points))
 
         // If we get here and expected_error is empty, test passes
         if (expected_error === "") {
@@ -108,7 +112,7 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
 
         // Typecheck
         const typechecker = new RustTypeChecker();
-        typechecker.check(tree);
+        typechecker.check(tree, false);
 
         // Compile
         const compiler = new RustCompiler();

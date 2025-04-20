@@ -1,4 +1,5 @@
 import { test_typechecker } from './TestingUtils.js';
+import { VisualisationPoints } from './TypeCheckerRust.js';
 
 test_typechecker(`
     fn main() {
@@ -35,18 +36,18 @@ fn main() -> i32 {
 
 test_typechecker(`
 fn main() {
-    fn f() -> i32 {
+    fn foo() -> i32 {
         if (true) {
             return 6;
         } else {
             return 7;
         }
     }
-    fn f2() -> i32 {
-        let mut x: i32 = f();
-        x = f() + 1;
-        x = f() + f() + x;
-        let mut y: i32 = f() + f();
+    fn foo2() -> i32 {
+        let mut x: i32 = foo();
+        x = foo() + 1;
+        x = foo() + foo() + x;
+        let mut y: i32 = foo() + foo();
         y = y + x;
         let TEST: i32 = 100;
         {
@@ -205,7 +206,7 @@ fn main() {
     fn foo() {}
 
     fn foo2() {
-        f(); // can access function names outside of scope
+        foo(); // can access function names outside of scope
     }
 
     foo();
@@ -325,7 +326,7 @@ test_typechecker(`
         foo(x_ref); // move x_ref into function
         let mut x_ref_2: &mut string = &mut x; // allowed to create new &mut x
     }
-    `, "", "Valid - Re-borrow After Mutable Borrow Ends")
+    `, "", "Valid - Re-borrow After Mutable Borrow Ends", false, VisualisationPoints.BORROWS_AND_MOVES)
 
 
 test_typechecker(`

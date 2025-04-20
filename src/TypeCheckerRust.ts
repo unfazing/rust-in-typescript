@@ -229,30 +229,18 @@ import { ShlContext } from "./parser/src/RustParser.js";
 import { ShrContext } from "./parser/src/RustParser.js";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor.js"
 import { ArrayType, ClosureType, compare_type, compare_types, ImmutableRefType, MutableRefType, peek, pop, push, RefType, ReturnType, ScalarType, ScalarTypeName, StringType, Type, TypeEnvironment, TypeFrame, UnitType, unparse_type } from "./TypeEnvRust.js";
-import { LOGGING_ENABLED } from "./TestingUtils.js";
 
 export class RustTypeChecker {
-    check(tree: ParseTree): undefined {
-        const typechecker = new TypeCheckerVisitor()
-        typechecker.visit(tree);
+    typechecker: TypeCheckerVisitor
+    check(tree: ParseTree, logging_enabled: boolean): undefined {
+        this.typechecker = new TypeCheckerVisitor(logging_enabled)
+        this.typechecker.visit(tree);
+    }
+
+    getVisualisation(vis_point: VisualisationPoints): string {
+        return this.typechecker.get_visualisation(vis_point)
     }
 }
-
-export function log(message: any, enclosing_function: string): void {
-    if (LOGGING_ENABLED) {
-        console.log(`[${enclosing_function}] --- ${message}`)
-    } 
-}
-
-export function print_or_throw_error(msg: string, ctx?: ParserRuleContext) {
-    const line_info = ctx ? `[Line: ${ctx.start.line - 1}] ` : ""
-    if (LOGGING_ENABLED) {
-        console.error("[!!!!!ERROR] " + msg)
-    } else {
-        throw new Error(line_info + msg);
-    }
-}
-
 
 // SIMPLE IMPLEMENTATION OF TYPE CHECKING OWNERSHIP 
 // - without considering existence of structs/loops/nested data structures
@@ -332,30 +320,156 @@ export function print_or_throw_error(msg: string, ctx?: ParserRuleContext) {
 // Because the lifetime of the literalExpression is the same as the borrow.
 
 
-let te: TypeEnvironment // an array of frame objects that map symbol to type
-let returnTypeStack: Type[] = [] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
 const IS_BLOCKTYPEFRAME = true
 const IS_FUNCTIONTYPEFRAME = false
+
+export enum VisualisationPoints {
+    NONE = 0,
+    MOVES = 1,
+    BORROWS = 2,
+    BORROWS_AND_MOVES = 3,
+}
+
 
 // Notes:
 // Usually, visiting all the way to leaf nodes returns Type object (Tyoe defined in RustTypeEnv.ts)
 // The only leaf node that returns string is 'Identifier'
 // The 'IdentifierPattern' node will return a [boolean, string] tuple, representing is_mut and symbol name.
 export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
-
-    constructor() {
+    te: TypeEnvironment // an array of frame objects that map symbol to type
+    returnTypeStack: Type[] // stack of return types. Peeking it will be used to check if the return type of current scope function is correct
+    logging_enabled: boolean
+    te_visualisation: [number, string, string, VisualisationPoints][] = [] // array of [line number, info, te.stringify(), point]
+    constructor(logging_enabled: boolean) {
         super();
-
-        // initialize global variables
-        te = new TypeEnvironment()
-        returnTypeStack = [] 
+        this.te = new TypeEnvironment()
+        this.returnTypeStack = []
+        this.logging_enabled = logging_enabled
     }
 
-    // entry node
+    // -------------- LOGGING AND ERROR ----------------
+    log(message: any, enclosing_function: string): void {
+        if (this.logging_enabled) {
+            console.log(`[${enclosing_function}] --- ${message}`)
+        } 
+    }
+
+    print_or_throw_error(msg: string, ctx: ParserRuleContext) {
+        const line_info = `[Line: ${ctx.start.line - 1}] `
+        if (this.logging_enabled) {
+            console.error("[!!!!!ERROR] " + msg)
+        } else {
+            throw new Error(line_info + msg);
+        }
+    }
+
+    // ---------------- VISUALISATION ------------------
+    get_visualisation(point: VisualisationPoints): string {
+        
+        let filtered_vis: [number, string, string, VisualisationPoints][]
+        switch (point) {
+            case VisualisationPoints.NONE:
+                return ""
+                
+            case VisualisationPoints.BORROWS_AND_MOVES:
+                filtered_vis = this.te_visualisation
+                break
+                
+            case VisualisationPoints.BORROWS:
+                filtered_vis = this.te_visualisation.filter(([line_no, info_str, te_stringify, vis_point]) => vis_point === VisualisationPoints.BORROWS)
+                break
+                
+            case VisualisationPoints.MOVES:
+                filtered_vis = this.te_visualisation.filter(([line_no, info_str, te_stringify, vis_point]) => vis_point === VisualisationPoints.MOVES)
+                break
+            }
+                        
+        // console.log(filtered_vis)
+        let result = ""
+        for (let i = 0; i < filtered_vis.length; i++) {
+            let [line_no, info_str, te_stringify, vis_point] = filtered_vis[i]
+            if (i === filtered_vis.length - 1 || filtered_vis[i][0] !== filtered_vis[i + 1][0]) {
+                result += (info_str + te_stringify + "\n")
+            } else {
+                // remove type env stringified if same line
+                result += info_str
+            }
+        }
+        return result
+    }
+
+
+    add_to_type_env_visualisation(ctx: ParserRuleContext, point: VisualisationPoints, info: string) {
+        const line_no: number = ctx.start.line - 1
+        const line_str: string = `[Line: ${line_no}] `
+        let info_str: string = ""
+        info_str += line_str
+        info_str += info + "\n"
+        this.te_visualisation.push([line_no, info_str, this.te.stringify() + "\n", point])
+    }
+    
+    // ------ HELPER FUNCTIONS FOR VISITOR FUNCTIONS -----
+    
+    checkValidParamAndReturnTypes(paramTypes: Type[], returnType: Type, ctx: ParserRuleContext) {
+        // Only allow function to take in at most a single param type if returnType is RefType
+        if (returnType instanceof RefType) {
+            let found: boolean = false
+            for (const type of paramTypes) {
+                if (type instanceof RefType) {
+                    if (found) {
+                        this.print_or_throw_error("Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", ctx)
+                    }
+
+                    if (!compare_type(type, returnType)) {
+                        this.print_or_throw_error("Type error in ClosureType construction; Returned ref must have same type as argument ref.", ctx)
+                    }
+                    found = true
+                }
+            }
+        }
+    }
+
+
+    getIntegerLiteral(ctx: LiteralExpressionContext): number {
+        if (ctx.INTEGER_LITERAL()) {
+            return Number(ctx.getText())
+        }
+        this.print_or_throw_error(`Type error; [getIntegerLiteral] Array length/index literal is not an integer.`, ctx)
+    }
+
+    // ImmutableRefTypes and ScalarTypes have copy trait and are not moved. 
+    // Closures have no owners
+    // "canBeMoved" equivalent to "doesNotImplementCopyTrait"
+    canBeMoved(type: Type): boolean {
+        if (type instanceof ArrayType) {
+            return this.canBeMoved(type.BaseType)
+        }
+        return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
+    }
+
+    // Used when getting a symbol from a borrow expression or path expression or index expression
+    getSymbolFromExpression(expr_ctx: ExpressionContext): string {
+        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression())
+        }
+
+        if (expr_ctx instanceof IndexExpressionContext) {
+            return this.getSymbolFromExpression(expr_ctx.expression(0))
+        }
+
+        if (expr_ctx instanceof PathExpression_Context) {
+            this.log(`[getSymbolFromExpression] Found symbol in expression: ${expr_ctx.getText()}`, "getSymbolFromExpression")
+            return this.visit(expr_ctx.pathExpression().getChild(0))
+        }
+        this.print_or_throw_error(`[getSymbolFromExpression] The ExpressionContext provided (${expr_ctx.getText()}) does not have a PathExpressionContext on the path to leaf node.`, expr_ctx)
+    }
+
+    // ------------ START OF VISITOR FUNCTIONS ----------------
+    // ENTRY NODE
     visitCrate(ctx: CrateContext) {
         
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
-        te.extend_type_environment(IS_BLOCKTYPEFRAME)
+        this.te.extend_type_environment(IS_BLOCKTYPEFRAME, "VISIT CRATE")
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "CRATE");
 
         // Scan out only local function declarations and their types
@@ -365,26 +479,18 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 const symbol: string = this.visit(fun.identifier());
                 const expected_param_types: Type[] = fun.functionParameters() ? this.visit(fun.functionParameters()) : [];
                 const expected_return_type: Type = fun.functionReturnType() ? this.visit(fun.functionReturnType()) : new UnitType();
+                this.checkValidParamAndReturnTypes(expected_param_types, expected_return_type, fun)
                 const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
                 
                 // add symbol binding to type environment
-                te.add_symbol_to_current_frame(symbol, fun_type);
+                this.te.add_symbol_to_current_frame(symbol, fun_type);
             }
         }
 
-        log(`TYPE ENVIRONMENT: ${JSON.stringify(te, null, 4)}`, "CRATE")
+        this.log(`TYPE ENVIRONMENT: ${JSON.stringify(this.te, null, 4)}`, "CRATE")
         this.visitChildren(ctx)
 
-        te.restore_type_environment();
-    }
-
-    // ImmutableRefTypes and ScalarTypes have copy trait and are not moved. 
-    // Closures have no owners
-    canBeMoved(type: Type): boolean {
-        if (type instanceof ArrayType) {
-            return this.canBeMoved(type.BaseType)
-        }
-        return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
+        this.te.restore_type_environment();
     }
 
     // ------------------------------ EXPRESSION ---------------------------------------------
@@ -405,30 +511,31 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                         ? "bool"
                         : "UNKNOWN"
         if (type === "UNKNOWN") {
-            print_or_throw_error(`Unknown type for literal expression: ${ctx.getText()}`, ctx)
+            this.print_or_throw_error(`Unknown type for literal expression: ${ctx.getText()}`, ctx)
         }
-        log(`EXPRESSION: ${ctx.getText()}, HAS TYPE: ${type}`, "LITERAL_EXPRESSION")
+        this.log(`EXPRESSION: ${ctx.getText()}, HAS TYPE: ${type}`, "LITERAL_EXPRESSION")
         return new ScalarType(type) // mutability does not apply to literals, only variables
     }
 
     // leaf node: returns the type of the symbol (by looking up type env)
     visitPathExpression(ctx: PathExpressionContext): Type {
         const symbol = this.visitChildren(ctx)
-        const type: Type = te.lookup_type(symbol) 
+        let type: Type
+        try {type = this.te.lookup_type(symbol)} catch (e) {this.print_or_throw_error(e, ctx)}
         
         if (type === undefined) {
-            print_or_throw_error(`Type error in pathExpression; Cannot find symbol ${symbol} in this scope.`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; Cannot find symbol ${symbol} in this scope.`, ctx)
         }
 
         if (type.IsMoved) {
-            print_or_throw_error(`Type error in pathExpression; use of a moved value: ${symbol}`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; use of a moved value: ${symbol}`, ctx)
         }
 
         if (type.MutableBorrowExists) {
-            print_or_throw_error(`Type error in pathExpression; use (read/write) of a mutably borrowed value: ${symbol}`, ctx)
+            this.print_or_throw_error(`Type error in pathExpression; use (read/write) of a mutably borrowed value: ${symbol}`, ctx)
         }
 
-        log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
+        this.log(`SYMBOL: ${symbol}, HAS TYPE: ${unparse_type(type)}`, "PATH_EXPRESSION")
         return type;
     }
 
@@ -438,25 +545,25 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const is_mut_borrow: boolean = (ctx.KW_MUT() != null)
         const inner_type: Type = this.visit(ctx.expression());
 
-        log(`${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}`, "BORROW_EXPRESSION");
+        this.log(`${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}`, "BORROW_EXPRESSION");
         
         if (inner_type instanceof ClosureType) {
-            print_or_throw_error(`Type error in borrow expression; cannot borrow a closure: ${unparse_type(inner_type)}`, ctx);            
+            this.print_or_throw_error(`Type error in borrow expression; cannot borrow a closure: ${unparse_type(inner_type)}`, ctx);            
         }
     
         // A borrow of a variable is happening. e.g. let y = &x;
-        log(`AN ${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED.`, "BORROW_EXPRESSION");
+        this.log(`AN ${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED.`, "BORROW_EXPRESSION");
 
         // if we are borrowing from temporary type: let y = &String::from("1");
         // allow mutable borrow even without mut keyword: let y = &mut String::from("1");
         if ( (is_mut_borrow && !inner_type.IsMutable) ) {
-            print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow to an immutable variable.`, ctx);
+            this.print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow to an immutable variable.`, ctx);
         
         } else if (inner_type.MutableBorrowExists) {
-            print_or_throw_error(`Type error in borrow expression; cannot borrow because owner already has a mutable borrow.`, ctx);
+            this.print_or_throw_error(`Type error in borrow expression; cannot borrow because owner already has a mutable borrow.`, ctx);
 
         } else if (inner_type.ImmutableBorrowCount > 0 && is_mut_borrow) {
-            print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow because owner already has an immutable borrow.`, ctx);
+            this.print_or_throw_error(`Type error in borrow expression; cannot create a mutable borrow because owner already has an immutable borrow.`, ctx);
         
         } else {
 
@@ -467,6 +574,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 inner_type.ImmutableBorrowCount++;
             }
 
+            this.add_to_type_env_visualisation(
+                ctx, 
+                VisualisationPoints.BORROWS,
+                `"${ctx.expression().getText()}" is being ${is_mut_borrow ? "mutably" : "immutably"} borrowed. Borrow Status: ${inner_type.ImmutableBorrowCount} immutable borrow(s), ${inner_type.MutableBorrowExists ? 1 : 0} mutable borrow.`
+            )
         }
 
         if (ctx.AND()) {
@@ -485,21 +597,21 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // STAR expression
     visitDereferenceExpression(ctx: DereferenceExpressionContext): Type {
         const expr_type: Type = this.visit(ctx.expression()) // this must be a ref type
-        log(`TRYING TO DEREFERENCE AN EXPRESSION WITH TYPE: ${unparse_type(expr_type)}`, "DEREFERENCE_EXPRESSION");
+        this.log(`TRYING TO DEREFERENCE AN EXPRESSION WITH TYPE: ${unparse_type(expr_type)}`, "DEREFERENCE_EXPRESSION");
 
         if (!(expr_type instanceof RefType)) {
-            print_or_throw_error(`Type error; dereferencing a non-reference type: ${unparse_type(expr_type)}`, ctx);
+            this.print_or_throw_error(`Type error; dereferencing a non-reference type: ${unparse_type(expr_type)}`, ctx);
             return new UnitType(); // prevent TS lint from throwing type error + prevent runtime error
         }
 
-        log(`FOUND INNER TYPE: ${unparse_type(expr_type.InnerType)}`, "DEREFERENCE_EXPRESSION");
+        this.log(`FOUND INNER TYPE: ${unparse_type(expr_type.InnerType)}`, "DEREFERENCE_EXPRESSION");
         return expr_type.InnerType; // question: do we miss any info about the type mutability? a temporary object has IsMutable = false by default;
     }
 
     // LPAREN innerAttribute* tupleElements? RPAREN
     visitTupleExpression(ctx: TupleExpressionContext): UnitType {
         if (ctx.tupleElements()) {
-            print_or_throw_error("Tuple expression not supported", ctx);
+            this.print_or_throw_error("Tuple expression not supported", ctx);
         }
 
         return new UnitType();
@@ -513,7 +625,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return new UnitType();
         }
         // log("[extend_type_environment] BEFORE: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
-        te.extend_type_environment(IS_BLOCKTYPEFRAME);
+        this.te.extend_type_environment(IS_BLOCKTYPEFRAME, "VISIT A BLOCK");
         // log("[extend_type_environment] AFTER: " + JSON.stringify(te.type_environment, null, 4), "BLOCK_EXPRESSION");
 
         // Scan out only local function declarations and their types
@@ -529,10 +641,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 const symbol: string = this.visit(fun.identifier());
                 const expected_param_types: Type[] = fun.functionParameters() ? this.visit(fun.functionParameters()) : [];
                 const expected_return_type: Type = fun.functionReturnType() ? this.visit(fun.functionReturnType()) : new UnitType();
+                this.checkValidParamAndReturnTypes(expected_param_types, expected_return_type, fun)
                 const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
                 
                 // add symbol binding to type environment
-                te.add_symbol_to_current_frame(symbol, fun_type);
+                this.te.add_symbol_to_current_frame(symbol, fun_type);
             }
         }
 
@@ -543,10 +656,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         let returned: boolean = false
 
         for (const statement of statements) {
-            log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
+            this.log(`Visiting child statement ${statement.getText()}`, "BLOCK_EXPRESSION");
             blockType = this.visit(statement)
             if (blockType instanceof ReturnType) {
-                log(`RETURN STATEMENT ENCOUNTERED: ${statement.getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
+                this.log(`RETURN STATEMENT ENCOUNTERED: ${statement.getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
                 returned = true
                 break
             }
@@ -556,31 +669,14 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // the type of the block is the type of the final expression
         if (!returned && ctx.statements().expression()) {
             blockType = this.visit(ctx.statements().expression())
-            log(`FINAL EXPRESSION ENCOUNTERED: ${ctx.statements().expression().getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
+            this.log(`FINAL EXPRESSION ENCOUNTERED: ${ctx.statements().expression().getText()}, BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
         }
 
-        log(`FINAL EVALUATED BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
+        this.log(`FINAL EVALUATED BLOCK TYPE: ${unparse_type(blockType)}`, "BLOCK_EXPRESSION")
 
-        te.restore_type_environment();
+        this.te.restore_type_environment();
 
         return blockType;
-    }
-
-    // Used when getting a symbol from a borrow expression or path expression
-    getSymbolFromExpression(expr_ctx: ExpressionContext): string {
-        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext) {
-            return this.getSymbolFromExpression(expr_ctx.expression())
-        }
-
-        if (expr_ctx instanceof IndexExpressionContext) {
-            return this.getSymbolFromExpression(expr_ctx.expression(0))
-        }
-
-        if (expr_ctx instanceof PathExpression_Context) {
-            log(`[getSymbolFromExpression] Found symbol in expression: ${expr_ctx.getText()}`, "getSymbolFromExpression")
-            return this.visit(expr_ctx.pathExpression().getChild(0))
-        }
-        print_or_throw_error(`[getSymbolFromExpression] The ExpressionContext provided (${expr_ctx.getText()}) does not have a PathExpressionContext on the path to leaf node.`, expr_ctx)
     }
 
     // expression EQ expression
@@ -604,7 +700,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
 
         // TODO: change the default to mutable: true
         if (!expected_type.IsMutable) {
-            print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.', ctx)
+            this.print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.', ctx)
         }
 
 
@@ -616,7 +712,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             const reftype: Type = this.visit(LHS.expression());
 
             if (!(reftype instanceof MutableRefType)) {
-                print_or_throw_error("Type error in assignment; cannot assign to a dereference of an immutable reference", ctx);
+                this.print_or_throw_error("Type error in assignment; cannot assign to a dereference of an immutable reference", ctx);
             } 
 
             // at this point, there must be a single mutable reference for this object. 
@@ -626,23 +722,23 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             if (LHS instanceof IndexExpressionContext) {
                 const arrayType: Type = this.visit(LHS.expression(0))
                 if (!arrayType.IsMutable) {
-                    print_or_throw_error("Type error in assignment; cannot assign to an element in an immutable array", ctx);
+                    this.print_or_throw_error("Type error in assignment; cannot assign to an element in an immutable array", ctx);
                 }
             }
             // LHS is not a deref expresssion; Hence LHS cannot have any live references before assignment
             if (expected_type.ImmutableBorrowCount > 0 || expected_type.MutableBorrowExists) {
-                print_or_throw_error(`Type error in assignment; cannot assign to a borrowed value: ${unparse_type(expected_type)}`, ctx);
+                this.print_or_throw_error(`Type error in assignment; cannot assign to a borrowed value: ${unparse_type(expected_type)}`, ctx);
             }
         }
         
-        log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
+        this.log(`EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "ASSIGNMENT_EXPRESSION");
 
         if (actual_type.IsMoved) {
-            print_or_throw_error(`Type error in assignment; Cannot assign to a moved value.`, ctx);
+            this.print_or_throw_error(`Type error in assignment; Cannot assign to a moved value.`, ctx);
         }
 
         if (!compare_type(expected_type, actual_type)) {
-            print_or_throw_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
+            this.print_or_throw_error(`Type error in assignment; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
         }
 
         // checks to prevent dangling reference during ref assignment
@@ -654,34 +750,44 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // }
         if (expected_type instanceof RefType) {
             const lhs_symbol: string = this.getSymbolFromExpression(LHS)
-            let rhs_scope_depth: number;
-            let lhs_scope_depth: number = te.get_scope_depth(lhs_symbol);
+            let rhs_symbol: string
+            let rhs_scope_depth: number
+            let lhs_scope_depth: number
+
+            try {lhs_scope_depth = this.te.get_scope_depth(lhs_symbol);} catch (e) {this.print_or_throw_error(e, ctx)}
+
             if (actual_type.IsTemporary) {
-                rhs_scope_depth = te.get_current_environment_depth()
+                rhs_scope_depth = this.te.get_current_environment_depth()
             } else {
-                const rhs_symbol: string = this.getSymbolFromExpression(RHS)
-                rhs_scope_depth = te.get_scope_depth(rhs_symbol);
+                rhs_symbol = this.getSymbolFromExpression(RHS)
+                try {rhs_scope_depth = this.te.get_scope_depth(rhs_symbol);} catch (e) {this.print_or_throw_error(e, ctx)}
             }
 
             if (lhs_scope_depth < rhs_scope_depth) {
-                print_or_throw_error(`Type error in assignment; Lifetime of locally assigned reference shorter than variable ${lhs_symbol}.`, ctx)
+                this.print_or_throw_error(`Type error in assignment; Lifetime of locally assigned reference shorter than variable ${lhs_symbol}.`, ctx)
             }
         }
-
-                    
 
         // An assignment that moves ownership of a variable is happening.
         if (this.canBeMoved(actual_type)) {
             if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
-                print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`, ctx);
+                this.print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`, ctx);
             } 
 
             if (ctx.expression(1) instanceof IndexExpressionContext) {
-                print_or_throw_error(`Type error in assignment; cannot move out of a non-copy array`)
+                this.print_or_throw_error(`Type error in assignment; cannot move out of a non-copy array`, ctx)
             }
             
             actual_type.mark_moved()
-            log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
+            this.log(`MARKING RHS ${RHS.getText()} AS MOVED`, "ASSIGNMENT_EXPRESSION");
+
+            // if (!actual_type.IsTemporary) {
+                this.add_to_type_env_visualisation(
+                    ctx, 
+                    VisualisationPoints.MOVES, 
+                    `"${RHS.getText()}" is being moved to "${this.getSymbolFromExpression(LHS)}" by assignment`
+                )
+            // }
         }
 
         return new UnitType() // assignment expression in Rust produce undefined! DIFFERENT FROM OTHER LANGUAGES
@@ -695,12 +801,12 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             returnedType = this.visit(ctx.expression())
         }
 
-        if (!compare_type(returnedType, peek(returnTypeStack, 0))) {
-            print_or_throw_error(`Type error in return statement; expected type: ${unparse_type(peek(returnTypeStack, 0))}, actual type: ${unparse_type(returnedType)}`, ctx);
+        if (!compare_type(returnedType, peek(this.returnTypeStack, 0))) {
+            this.print_or_throw_error(`Type error in return statement; expected type: ${unparse_type(peek(this.returnTypeStack, 0))}, actual type: ${unparse_type(returnedType)}`, ctx);
         }
 
         const return_type = new ReturnType(returnedType)
-        log(`RETURN TYPE: ${unparse_type(return_type)}`, "RETURN_EXPRESSION")
+        this.log(`RETURN TYPE: ${unparse_type(return_type)}`, "RETURN_EXPRESSION")
         return return_type
     }
 
@@ -712,18 +818,18 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // expression LPAREN callParams? RPAREN
     visitCallExpression(ctx: CallExpressionContext): Type {
         const expected_type: Type = this.visit(ctx.expression()) // lookup type in pathExpression node
-        log(`EXPECTED CLOSURE TYPE: ${unparse_type(expected_type)}`, "CALL_EXPRESSION");
+        this.log(`EXPECTED CLOSURE TYPE: ${unparse_type(expected_type)}`, "CALL_EXPRESSION");
         if (!(expected_type instanceof ClosureType)) {
-            print_or_throw_error("Type error in application; function application must have function type.", ctx)
+            this.print_or_throw_error("Type error in application; function application must have function type.", ctx)
             return; // let typescript knows expected_type must be closure
         }
 
         const expected_arg_types: Type[] = expected_type.ParamTypes;
         const actual_arg_types: Type[] = ctx.callParams() ? this.visit(ctx.callParams()) : [];
-        log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types.map(unparse_type)}, ACTUAL ARGUMENT TYPES: ${actual_arg_types.map(unparse_type)}`, "CALL_EXPRESSION");
+        this.log(`EXPECTED ARGUMENT TYPES: ${expected_arg_types.map(unparse_type)}, ACTUAL ARGUMENT TYPES: ${actual_arg_types.map(unparse_type)}`, "CALL_EXPRESSION");
         // typecheck arguments
         if (!compare_types(expected_arg_types, actual_arg_types)) {
-            print_or_throw_error("Type error in application; argument types unmatched.", ctx)
+            this.print_or_throw_error("Type error in application; argument types unmatched.", ctx)
         }
 
         if (actual_arg_types.length > 0) {
@@ -734,15 +840,23 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 // Case where variables passed to function argument leads to moving ownership
                 if (this.canBeMoved(type)) {
                     if (type.ImmutableBorrowCount > 0 || type.MutableBorrowExists) {
-                        print_or_throw_error(`Type error in application; cannot move a borrowed value into function.`, ctx);
+                        this.print_or_throw_error(`Type error in application; cannot move a borrowed value into function.`, ctx);
                     }
 
                     if (expr instanceof IndexExpressionContext) {
-                        print_or_throw_error(`Type error in application; cannot move out of a non-copy array`)
+                        this.print_or_throw_error(`Type error in application; cannot move out of a non-copy array`, ctx)
                     }
                     
                     type.mark_moved();
-                    log(`MARKING ARGUMENT AT POSITION ${i} AS MOVED`, "CALL_EXPRESSION");
+                    this.log(`MARKING ARGUMENT AT POSITION ${i} AS MOVED`, "CALL_EXPRESSION");
+
+                    // if (!type.IsTemporary) {
+                        this.add_to_type_env_visualisation(
+                            ctx, 
+                            VisualisationPoints.MOVES,
+                            `"${ctx.callParams().expression(i).getText()}" is being moved to function call of "${ctx.expression().getText()}"`
+                        )
+                    // }
                 }
             }
         }
@@ -751,18 +865,24 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // invariant 1: it must take in at most a single reftype
         // invariant 2: it must return the same reftype object taking in as argument
         if (expected_type.ReturnType instanceof RefType) {
-            for (const type of actual_arg_types) {
+            for (let i = 0; i < actual_arg_types.length; i++) {
+                const type: Type = actual_arg_types[i]
                 if (type instanceof RefType) {
                     // update borrow status of mutable ref type that was initially moved/freed
                     if (type instanceof MutableRefType) {
                         type.InnerType.MutableBorrowExists = true
-                        log(`Updating inner type mutable borrow status`, "CALL_EXPRESSION")
-                        log(`Type: ${unparse_type(type)}`, "CALL_EXPRESSION")
+                        this.log(`Updating inner type mutable borrow status`, "CALL_EXPRESSION")
+                        this.log(`Type: ${unparse_type(type)}`, "CALL_EXPRESSION")
+                        this.add_to_type_env_visualisation(
+                            ctx, 
+                            VisualisationPoints.BORROWS,
+                            `"${ctx.callParams().expression(i).getText()}" is being returned as a mutable borrow from a call of "${ctx.expression().getText()}". Borrow Status: ${type.InnerType.ImmutableBorrowCount} immutable borrow(s), ${type.InnerType.MutableBorrowExists ? 1 : 0} mutable borrow.`
+                        )
                     }
                     return type
                 }
             }
-            print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`, ctx)
+            this.print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`, ctx)
         } else {
             // clone the object return type so the ReturnType of the ClosureType 
             // saved in environment is not destructively modified during ownership moving.
@@ -793,29 +913,29 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                                     ? "|"
                                     : ctx.CARET()
                                         ? "^"
-                                        : print_or_throw_error(`Type error; Unkown operator symbol`, ctx)
+                                        : this.print_or_throw_error(`Type error; Unkown operator symbol`, ctx)
 
-        log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
+        this.log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "ARITHMETIC_OR_LOGICAL_EXPRESSION");
 
         // log(JSON.stringify(te.type_environment, null, 4), "arith");
 
         // bitwise operation
         if ((symbol === '&') || (symbol === '|') || (symbol === '^')) {
             if (compare_type(t1, t2) && (t1.TypeName === 'i32')) return new ScalarType('i32') 
-            print_or_throw_error(`Type error in bitwise operation; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+            this.print_or_throw_error(`Type error in bitwise operation; Bitwise operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
         }
 
         // MODULO operation
         if (symbol === '%') {
             if (compare_type(t1, t2) && (t1.TypeName === 'i32')) return new ScalarType('i32')
-            print_or_throw_error(`Type error in modulo operation; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+            this.print_or_throw_error(`Type error in modulo operation; Modulo operator '${symbol}' requires matching i32 operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
         }
 
         // overload "+" for strings
         if (symbol === '+') {
             if (t1.TypeName === 'string' && compare_type(t1, t2)) return new StringType()
             if ((t1.TypeName === 'i32' || t1.TypeName === 'f64') && compare_type(t1, t2)) return new ScalarType(t1.TypeName)
-            print_or_throw_error(`Type error in addition operation; Add operator '${symbol}' requires matching i32/f64/string operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+            this.print_or_throw_error(`Type error in addition operation; Add operator '${symbol}' requires matching i32/f64/string operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
 
         }
 
@@ -824,7 +944,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return new ScalarType(t1.TypeName)
         } 
         
-        print_or_throw_error(`Type error in arithmetic operation; Operator '${symbol}' requires matching numeric operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+        this.print_or_throw_error(`Type error in arithmetic operation; Operator '${symbol}' requires matching numeric operand types, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
 
         return new UnitType(); // prevent runtime error (return undefined)
     }
@@ -839,12 +959,12 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             ? "&&"
             : ctx.OROR() != null
                 ? "||"
-                : print_or_throw_error('Type error; Unknown boolean operator', ctx)
+                : this.print_or_throw_error('Type error; Unknown boolean operator', ctx)
 
-        log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION");
+        this.log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "LAZY_BOOLEAN_EXPRESSION");
         // Both operands must be boolean
         if (t1.TypeName !== "bool" || t2.TypeName !== "bool") {
-            print_or_throw_error(`Type error in boolean operation; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
+            this.print_or_throw_error(`Type error in boolean operation; Boolean operator ${symbol} requires boolean operands, found ${unparse_type(t1)} and ${unparse_type(t2)}`, ctx);
         }
 
         return new ScalarType("bool")
@@ -868,9 +988,9 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                             ? "<"
                             : op.NE()
                                 ? "!=="
-                                : print_or_throw_error('Type error; Unknown comparison operator', ctx);
+                                : this.print_or_throw_error('Type error; Unknown comparison operator', ctx);
 
-        log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
+        this.log(`LEFT OPERAND TYPE: ${unparse_type(t1)}, RIGHT OPERAND TYPE: ${unparse_type(t2)}, SYMBOL: ${symbol}`, "COMPARISON_EXPRESSION");
 
         switch (symbol) {
             case ">=":
@@ -880,7 +1000,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 const valid_type1 = (t1.TypeName === 'i32' || t1.TypeName === 'f64');
                 const valid_type2 = (t2.TypeName === 'i32' || t2.TypeName === 'f64');
                 if (!valid_type1 || !valid_type2) {
-                    print_or_throw_error(
+                    this.print_or_throw_error(
                         `Type error in comparison expression; Operator '${symbol}' requires matching numeric operands, ` + 
                         `found ${unparse_type(t1)} and ${unparse_type(t2)}`, 
                         ctx
@@ -894,7 +1014,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 break;
 
             default:
-                print_or_throw_error(`Type error; Unsupported operator: '${symbol}'`, ctx);
+                this.print_or_throw_error(`Type error; Unsupported operator: '${symbol}'`, ctx);
         }
 
         return new ScalarType("bool");
@@ -907,20 +1027,20 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             ? "!"
             : ctx.NOT()
                 ? "-unary"
-                : print_or_throw_error("Type error; Unknown unary operator", ctx);
+                : this.print_or_throw_error("Type error; Unknown unary operator", ctx);
 
-        log(`OPERAND TYPE: ${unparse_type(t1)}, SYMBOL: ${sym}`, "NEGATION_EXPRESSION");
+        this.log(`OPERAND TYPE: ${unparse_type(t1)}, SYMBOL: ${sym}`, "NEGATION_EXPRESSION");
 
         switch (sym) {
             case '!':
                 if (t1.TypeName !== "bool") {
-                    print_or_throw_error(`Type error; Logical NOT operator '!' requires boolean operand, found ${unparse_type(t1)}`, ctx);
+                    this.print_or_throw_error(`Type error; Logical NOT operator '!' requires boolean operand, found ${unparse_type(t1)}`, ctx);
                 }
                 break;
 
             case "-unary":
                 if (t1.TypeName !== "i32" && t1.TypeName !== 'f64') {
-                    print_or_throw_error(`Type error; Negation operator '-' requires numeric operand (i32 or f64), found ${unparse_type(t1)}`, ctx);
+                    this.print_or_throw_error(`Type error; Negation operator '-' requires numeric operand (i32 or f64), found ${unparse_type(t1)}`, ctx);
                 }
                 break;
         }
@@ -943,7 +1063,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const pred_type: Type = this.visit(predicate);
 
         if (pred_type.TypeName !== "bool") {
-            print_or_throw_error("Type error; expected predicate type: bool, " +
+            this.print_or_throw_error("Type error; expected predicate type: bool, " +
                                 "actual predicate type: " + unparse_type(pred_type),
                                 ctx
             )
@@ -962,16 +1082,16 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 else_type = this.visit(ctx.ifExpression());
             } else {
                 // this is an if let expression: not within scope
-                print_or_throw_error("Type error; If-Let expression is not supported.", ctx)
+                this.print_or_throw_error("Type error; If-Let expression is not supported.", ctx)
             }
         }
 
-        log(`CONSEQUENT BRANCH TYPE: ${unparse_type(then_type)}, ALTERNATIVE BRANCH TYPE: ${unparse_type(else_type)}`, "IF_EXPRESSION");
+        this.log(`CONSEQUENT BRANCH TYPE: ${unparse_type(then_type)}, ALTERNATIVE BRANCH TYPE: ${unparse_type(else_type)}`, "IF_EXPRESSION");
 
         if (compare_type(then_type, else_type)) {
             return then_type;
         } else {
-            print_or_throw_error("Type error; Types of branches not matching; " +
+            this.print_or_throw_error("Type error; Types of branches not matching; " +
                 "consequent type: " + unparse_type(then_type) + ", " +
                 "alternative type: " + unparse_type(else_type),
                 ctx
@@ -986,10 +1106,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const predicate: ExpressionContext = ctx.expression();
         const pred_type: Type = this.visit(predicate); // this is a group expression: "(expression)"
 
-        log(`PREDICATE_TYPE: ${unparse_type(pred_type)}`, "PREDICATE_LOOP_EXPRESSION");
+        this.log(`PREDICATE_TYPE: ${unparse_type(pred_type)}`, "PREDICATE_LOOP_EXPRESSION");
 
         if (pred_type.TypeName !== "bool") {
-            print_or_throw_error("Type error; expected predicate type: bool, " +
+            this.print_or_throw_error("Type error; expected predicate type: bool, " +
                 "actual predicate type: " + unparse_type(pred_type),
                 ctx
             )
@@ -1027,11 +1147,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 value instanceof BorrowExpressionContext ||  
                 value instanceof ArrayExpressionContext || 
                 value instanceof DereferenceExpressionContext)
-            ) print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${value.getText()}`)
+            ) this.print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${value.getText()}`, ctx)
             
             const type: Type = this.visit(value)
             if (this.canBeMoved(type)) {
-                print_or_throw_error(`Type error in array elements; ${unparse_type(type)} does not have copy trait, unable to make copies into elements of the array`)
+                this.print_or_throw_error(`Type error in array elements; ${unparse_type(type)} does not have copy trait, unable to make copies into elements of the array`, ctx)
             }
 
             const size: number = this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext))
@@ -1050,7 +1170,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 expr_ctx instanceof BorrowExpressionContext ||  
                 expr_ctx instanceof ArrayExpressionContext || 
                 expr_ctx instanceof DereferenceExpressionContext)
-            ) print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`)
+            ) this.print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`, ctx)
 
             const next_elem_type: Type = this.visit(expr_ctx)
             types.push(next_elem_type)
@@ -1059,7 +1179,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 continue
             } 
             if (!compare_type(type, next_elem_type)) {
-                print_or_throw_error(`Type error in array elements; elements of an array must all have same type. Found ${unparse_type(type)} and ${unparse_type(next_elem_type)}`)
+                this.print_or_throw_error(`Type error in array elements; elements of an array must all have same type. Found ${unparse_type(type)} and ${unparse_type(next_elem_type)}`, ctx)
             }
         }
         return new ArrayType(types, type.clone())
@@ -1071,7 +1191,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const index: number = this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext))
         const array_type: Type = this.visit(ctx.expression(0))
         if (!(array_type instanceof ArrayType)) {
-            print_or_throw_error(`Type error in index expression; Attempting to index a variable of type ${unparse_type(array_type)}`, ctx)
+            this.print_or_throw_error(`Type error in index expression; Attempting to index a variable of type ${unparse_type(array_type)}`, ctx)
         }
 
         return (array_type as ArrayType).ContainedTypes[index]
@@ -1082,7 +1202,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // leaf node: returns the type declared in the declaration statement
     visitType_(ctx: Type_Context): Type {
         if (!ctx.typeNoBounds()) {
-            print_or_throw_error("Type error; Unsupported type.", ctx);
+            this.print_or_throw_error("Type error; Unsupported type.", ctx);
         }
 
         return this.visitChildren(ctx);
@@ -1113,15 +1233,8 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return this.visit(ctx.arrayType())
         }
 
-        print_or_throw_error("Type error; Unsupported type.", ctx);
+        this.print_or_throw_error("Type error; Unsupported type.", ctx);
     };
-
-    getIntegerLiteral(ctx: LiteralExpressionContext): number {
-        if (ctx.INTEGER_LITERAL()) {
-            return Number(ctx.getText())
-        }
-        print_or_throw_error(`Type error; [getIntegerLiteral] Array length/index literal is not an integer.`, ctx)
-    }
 
     // arrayType
     // : LSQUAREBRACKET type_ SEMI expression RSQUAREBRACKET
@@ -1145,7 +1258,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // This invariant will be checked again in visitBorrowExpression() 
         inner_type.IsMutable = is_mut; 
 
-        log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
+        this.log(`REFERENCE HAS INNER_TYPE: ${unparse_type(inner_type)}, AND IS_MUTABLE: ${is_mut}`, "REFERENCE_EXPRESSION");
 
         let ref_type: RefType = is_mut ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type);
         return ref_type;
@@ -1161,9 +1274,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             ? this.visit(ctx.bareFunctionReturnType())
             : new UnitType() 
 
+        this.checkValidParamAndReturnTypes(paramTypes, returnType, ctx)
         const closure: ClosureType = new ClosureType(paramTypes, returnType);
 
-        log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
+        this.log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
 
         return closure;
     }
@@ -1194,7 +1308,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         if (ctx.type_().length == 0) {
             return new UnitType();
         } else {
-            print_or_throw_error("Type error; Tuple type not supported.", ctx)
+            this.print_or_throw_error("Type error; Tuple type not supported.", ctx)
         }
     }
 
@@ -1214,7 +1328,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                     continue
                 }
                 if (borrow_param) {
-                    print_or_throw_error("Type error in function declaration; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", ctx)
+                    this.print_or_throw_error("Type error in function declaration; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", ctx)
                 }
                 borrow_param = type
             }
@@ -1232,27 +1346,29 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // te.add_symbol_to_current_frame(symbol, fun_type);
 
         // extend the environment to store type mapping for parameters
-        te.extend_type_environment(IS_FUNCTIONTYPEFRAME)
-
         const symbol: string = this.visit(ctx.identifier());
-        let fun_type: Type = te.lookup_type(symbol)
+        this.te.extend_type_environment(IS_FUNCTIONTYPEFRAME, `PARAMETERS OF FUNCTION "${symbol}"`)
+
+        let fun_type: Type 
+        try {fun_type = this.te.lookup_type(symbol)} catch (e) {this.print_or_throw_error(e, ctx)}
+
         if (!(fun_type instanceof ClosureType)) {
-            print_or_throw_error(`Type error in function declaration; looked up symbol scanned '${symbol}' declaration and did not find a function type.`)
+            this.print_or_throw_error(`Type error in function declaration; looked up symbol scanned '${symbol}' declaration and did not find a function type.`, ctx)
         } 
 
         const expected_param_types: Type[] = (fun_type as ClosureType).ParamTypes
         const expected_return_type: Type = (fun_type as ClosureType).ReturnType
 
         // push the return type of the function to the stack
-        returnTypeStack = push(returnTypeStack, expected_return_type); 
+        this.returnTypeStack = push(this.returnTypeStack, expected_return_type); 
         
         let arity = expected_param_types.length;
-        log(`ARITY: ${arity}`, "FUNCTION_")
+        this.log(`ARITY: ${arity}`, "FUNCTION_")
         for (let i = 0; i < arity; i++) {
             const function_param = ctx.functionParameters().functionParam(i);
 
             if (!function_param.functionParamPattern()) {
-                print_or_throw_error("Type error in function declaration; Function parameters must have their types declared.", ctx)
+                this.print_or_throw_error("Type error in function declaration; Function parameters must have their types declared.", ctx)
                 return new UnitType();
             }
 
@@ -1260,34 +1376,34 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             const [_, parameter_sym]: [boolean, string] = this.visit(function_param.functionParamPattern().pattern()); 
             
             // add symbol mapping to current function frame
-            te.add_symbol_to_current_frame(parameter_sym, expected_param_types[i]);
+            this.te.add_symbol_to_current_frame(parameter_sym, expected_param_types[i]);
 
             // the actual assignment of arguments to parameters is done in visitCallExpression
         }
-        log(`PARAM TYPES: ${expected_param_types.map(x => unparse_type(x))}`, "FUNCTION_")
+        this.log(`PARAM TYPES: ${expected_param_types.map(x => unparse_type(x))}`, "FUNCTION_")
 
         if (ctx.blockExpression() === null) {
-            print_or_throw_error("Type error in function declaration; Function must have body.", ctx)
+            this.print_or_throw_error("Type error in function declaration; Function must have body.", ctx)
         }
         let body_type = this.visit(ctx.blockExpression())
         body_type = body_type instanceof ReturnType ? body_type.ReturnedType : body_type // unwrap return type
-        log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
+        this.log(`FUNCTION BODY EVALUATES TO: ${unparse_type(body_type)}`, "FUNCTION_")
 
         // check that a function that returns a reftype takes in at most one reference as argument and returns that argument
         if (expected_return_type instanceof RefType) {
             const borrow_param = findBorrowParam(expected_param_types)
             if ((borrow_param as RefType).InnerType != body_type.InnerType) {
-                print_or_throw_error(`Type error in function declaration; Function returns a locally declared reference.`, ctx)
+                this.print_or_throw_error(`Type error in function declaration; Function returns a locally declared reference.`, ctx)
             }
         }
 
-        te.restore_type_environment()
+        this.te.restore_type_environment()
 
         if (!compare_type(expected_return_type, body_type)) {
-            print_or_throw_error(`Type error in function declaration; Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`, ctx)
+            this.print_or_throw_error(`Type error in function declaration; Function body returns ${unparse_type(body_type)} instead of the expected ${unparse_type(expected_return_type)}`, ctx)
         }
 
-        returnTypeStack = pop(returnTypeStack) // pop the return type of the function from the stack
+        this.returnTypeStack = pop(this.returnTypeStack) // pop the return type of the function from the stack
 
         return new UnitType()
     }
@@ -1308,7 +1424,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // functionParamPattern: pattern COLON (type_ | DOTDOTDOT)
     visitFunctionParam(ctx: FunctionParamContext): Type {
         if (!ctx.functionParamPattern() || !ctx.functionParamPattern().type_()) {
-            print_or_throw_error("Type error in function param; Function parameter must have parameter name and type.", ctx);
+            this.print_or_throw_error("Type error in function param; Function parameter must have parameter name and type.", ctx);
             return new UnitType(); // Assume undeclared types as unit type for now to prevent runtime exception
         }
 
@@ -1337,16 +1453,16 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // UnitType -> [expression SEMI] when the expression is not a return statement
     // Any Type -> [expressionWithBlock SEMI?] when expressionWithBlock evaluates to a non-ReturnType
     visitExpressionStatement(ctx: ExpressionStatementContext): Type {
-        log(`TEXT: ${ctx.getText()}`, "EXPRESSION_STATEMENT");
+        this.log(`TEXT: ${ctx.getText()}`, "EXPRESSION_STATEMENT");
         if (ctx.expressionWithBlock()) {
             const expr_type: Type = this.visit(ctx.expressionWithBlock());
-            log(`FOUND EXPRESSIONWITHBLOCK: ${ctx.expressionWithBlock().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
+            this.log(`FOUND EXPRESSIONWITHBLOCK: ${ctx.expressionWithBlock().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
             return expr_type;
         }
 
         if (ctx.expression()) {
             const expr_type: Type = this.visit(ctx.expression());
-            log(`FOUND EXPRESSION SEMI: ${ctx.expression().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
+            this.log(`FOUND EXPRESSION SEMI: ${ctx.expression().getText()}, TYPE: ${unparse_type(expr_type)}`, "EXPRESSION_STATEMENT");
             return expr_type instanceof ReturnType ? expr_type : new UnitType()
         }
     }
@@ -1359,14 +1475,18 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const [is_mut, symbol]: [boolean, string] = this.visit(ctx.patternNoTopAlt());
         
         if (!ctx.type_()) {
-            print_or_throw_error(`Type error in let statement; Missing type declaration for ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Missing type declaration for ${symbol}.`, ctx);
         }
 
         if (!ctx.expression()) {
-            print_or_throw_error(`Type error in let statement; Missing assignment in let statement for ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Missing assignment in let statement for ${symbol}.`, ctx);
         }
     
         let expected_type: Type = this.visit(ctx.type_());
+
+        // allow variable shadowing (reassignment of symbol)
+        this.te.add_symbol_to_current_frame(symbol, expected_type);
+
         expected_type.IsMutable = is_mut;
 
         // either  
@@ -1384,31 +1504,16 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return actual_type; // allows block expression to terminate early 
         }
         
-        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
+        this.log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "LET_STATEMENT");
 
         if (actual_type.IsMoved) {
-            print_or_throw_error(`Type error in let statement; Cannot assign to a moved value.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Cannot assign to a moved value.`, ctx);
         }
 
         if (!compare_type(expected_type, actual_type)) {
-            print_or_throw_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
+            this.print_or_throw_error(`Type error in let statement; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
         }
-
-        // Ownership moving. Do not allow moving ownership of closure(fn) type.
-        if (this.canBeMoved(expected_type)) {
-
-            if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
-                print_or_throw_error(`Type error in let statement; cannot move a borrowed value: ${symbol}`, ctx);
-            }
-
-            if (ctx.expression() instanceof IndexExpressionContext) {
-                print_or_throw_error(`Type error in let statement; cannot move out of a non-copy array`)
-            }
-            
-            actual_type.mark_moved()
-            log(`Moved ownership into variable ${symbol}`, "LET_STATEMENT");
-        }
-
+        
         // do a shalow copy of the inner type during borrowing
         if (expected_type instanceof RefType) {
             expected_type.InnerType = (actual_type as RefType).InnerType; 
@@ -1418,8 +1523,29 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             expected_type.ContainedTypes = (actual_type as ArrayType).ContainedTypes
         }
 
-        // allow variable shadowing (reassignment of symbol)
-        te.add_symbol_to_current_frame(symbol, expected_type);
+        // Ownership moving. Do not allow moving ownership of closure(fn) type.
+        if (this.canBeMoved(actual_type)) {
+
+            if (actual_type.ImmutableBorrowCount > 0 || actual_type.MutableBorrowExists) {
+                this.print_or_throw_error(`Type error in let statement; cannot move a borrowed value: ${symbol}`, ctx);
+            }
+
+            if (ctx.expression() instanceof IndexExpressionContext) {
+                this.print_or_throw_error(`Type error in let statement; cannot move out of a non-copy array`, ctx)
+            }
+            
+            actual_type.mark_moved()
+            this.log(`Moved ownership into variable ${symbol}`, "LET_STATEMENT");
+
+            // if (!actual_type.IsTemporary) {
+                this.add_to_type_env_visualisation(
+                    ctx, 
+                    VisualisationPoints.MOVES,
+                    `"${ctx.expression().getText()}" is being moved to "${symbol}" by let declaration`
+                ) 
+            // }
+        }
+
         
         return new UnitType(); // statements produce undefined
     }
@@ -1433,26 +1559,26 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const symbol: string = this.visit(ctx.identifier());
 
         if (!ctx.type_()) {
-            print_or_throw_error(`Type error in constant declaration; Missing type declaration for constant ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; Missing type declaration for constant ${symbol}.`, ctx);
         }
 
         if (!ctx.expression()) {
-            print_or_throw_error(`Type error in constant declaration; Missing assignment for constant ${symbol}.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; Missing assignment for constant ${symbol}.`, ctx);
         }
 
         const expected_type: Type = this.visit(ctx.type_());
         const actual_type: Type = this.visit(ctx.expression());
-        log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
+        this.log(`SYMBOL: ${symbol}, EXPECTED_TYPE: ${unparse_type(expected_type)}, ACTUAL TYPE: ${unparse_type(actual_type)}`, "CONSTANT_ITEM");
 
         if (expected_type instanceof RefType) {
-            print_or_throw_error(`Type error in constant declaration; constant ${symbol} cannot be a reference type.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; constant ${symbol} cannot be a reference type.`, ctx);
         }
 
         if (!compare_type(expected_type, actual_type)) {
-            print_or_throw_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
+            this.print_or_throw_error(`Type error in constant declaration; Expected type: ${unparse_type(expected_type)}, actual type: ${unparse_type(actual_type)}.`, ctx);
         }
 
-        te.add_symbol_to_current_frame(symbol, expected_type); // expected_type is not mutable by default
+        this.te.add_symbol_to_current_frame(symbol, expected_type); // expected_type is not mutable by default
 
         return new UnitType() // statements produce undefined
     }

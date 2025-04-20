@@ -3,7 +3,6 @@
  * *****************/
 
 import { assert } from "console";
-import { log, print_or_throw_error } from "./TypeCheckerRust.js";
 
 /* **********************
  * using arrays as stacks
@@ -33,7 +32,7 @@ export class TypeEnvironment {
     private global_type_frame: TypeFrame
 
     constructor() {
-        this.type_environment = empty_type_environment
+        this.type_environment = []
         this.global_type_frame = new GlobalTypeFrame()
     }
 
@@ -64,8 +63,7 @@ export class TypeEnvironment {
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
                 if (must_be_closure && !(type_found instanceof ClosureType)) {
-                    print_or_throw_error(`Type error in pathExpression; [lookup_type] Variable ${x} is from an outer scope.`)
-                    return;
+                    throw new Error(`Type error in pathExpression; [lookup_type] Variable ${x} is from an outer scope.`)
                 }
                 return type_found
             }
@@ -81,15 +79,15 @@ export class TypeEnvironment {
             return this.global_type_frame.frame[x]
         }
 
-        print_or_throw_error(`Type error in pathExpression; [lookup_type] Unbound variable ${x}.`)
+        throw new Error(`Type error in pathExpression; [lookup_type] Unbound variable ${x}.`)
     }
 
     // extend the environment destructively 
-    extend_type_environment = (is_blocktypeframe: boolean) => {
+    extend_type_environment = (is_blocktypeframe: boolean, annotation: string) => {
 
         const new_frame: TypeFrame = is_blocktypeframe 
-            ? new BlockTypeFrame() 
-            : new FunctionTypeFrame()
+            ? new BlockTypeFrame(annotation) 
+            : new FunctionTypeFrame(annotation)
 
         this.push(new_frame)
     }
@@ -128,47 +126,101 @@ export class TypeEnvironment {
         if (this.global_type_frame.frame.hasOwnProperty(symbol)) {
             return 0
         }
-        print_or_throw_error(`Type error; [get_scope_depth] Unbound variable ${symbol}.`)
+        throw new Error(`Type error; [get_scope_depth] Unbound variable ${symbol}.`)
     }
 
     get_current_environment_depth(): number {
         return this.type_environment.length
     }
+
+    stringify(): string {
+        let output = "Type Environment:\n";
+        output += "====================\n";
+
+        // Local frames (from most recent to oldest)
+        for (let i = this.type_environment.length - 1; i >= 0; i--) {
+            const frame = this.type_environment[i];
+            const frameType = frame instanceof FunctionTypeFrame ? "Function Frame" : "Block Frame";
+            output += `[Depth ${i + 1}] ${frameType}: ${frame.annotation}:\n`;
+            if (Object.keys(frame.frame).length === 0) {
+                output += "  (empty)\n";
+            } else {
+                for (const symbol in frame.frame) {
+                    output += `  ${symbol}: ${this.stringifyType(frame.frame[symbol])}\n`;
+                }
+            }
+            output += "-------------------\n";
+        }
+
+
+        // Global frame
+        output += "[Depth: 0] Global Frame:\n";
+        if (Object.keys(this.global_type_frame.frame).length === 0) {
+            output += "  (empty)\n";
+        } else {
+            for (const symbol in this.global_type_frame.frame) {
+                output += `  ${symbol}: ${this.stringifyType(this.global_type_frame.frame[symbol])}\n`;
+            }
+        }
+        output += "-------------------\n";
+
+
+        return output;
+    }
+
+    private stringifyType(type: Type): string {
+        let details = `${type.TypeName}`;
+        const flags: string[] = [];
+        if (type.IsMutable) flags.push("Mutable");
+        if (type.IsMoved) flags.push("Moved");
+        if (type.IsTemporary) flags.push("Temporary");
+        if (type.MutableBorrowExists) flags.push("Mutably Borrowed");
+        if (type.ImmutableBorrowCount > 0) flags.push(`Immutable Borrows: ${type.ImmutableBorrowCount}`);
+
+        if (flags.length > 0) {
+            details += ` (${flags.join(', ')})`;
+        }
+
+        if (type instanceof RefType) {
+            details += ` (Points to: ${type.InnerType ? this.stringifyType(type.InnerType) : 'null'})`;
+        } else if (type instanceof ArrayType) {
+            details += ` (Element Type: ${this.stringifyType(type.BaseType)}, Size: ${type.ContainedTypes.length})`;
+        }
+
+        return details;
+    }
 }
 
 export abstract class TypeFrame {
     frame: {[key:string]: Type}
-    
-    constructor() {
+    annotation: string
+    constructor(annotation) {
         this.frame = {}
+        this.annotation = annotation
     }
 
     // add a new variable to the frame
     add_variable = (x: string, t: Type) => {
-        // NATHAN: should we allow reassignment of symbol since we are scanning statement by statement?
-        // if (this.frame.hasOwnProperty(x)) {
-        //     print_error(`[add_variable] Variable ${x} already exists in the frame`)
-        // }
         this.frame[x] = t
     }
 }
 
 export class GlobalTypeFrame extends TypeFrame {
     constructor() {
-        super()
+        super("Global constants/builtins")
         // TODO: add global constants/builtins here
     }
 }
 
 export class FunctionTypeFrame extends TypeFrame {
-    constructor() {
-        super()
+    constructor(annotation: string) {
+        super(annotation)
     }
 }
 
 export class BlockTypeFrame extends TypeFrame {
-    constructor() {
-        super()
+    constructor(annotation: string) {
+        super(annotation)
     }
 }
 
@@ -176,11 +228,11 @@ export class BlockTypeFrame extends TypeFrame {
 // symbols (strings) to types.
 
 // Type environment is a stack implemented with array 
-const empty_type_environment = []
+// const empty_type_environment = []
 // export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array"
+export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array" | "immutableRefType" | "mutableRefType"
 
 // Type is a class
 // TypeName is a string. 
@@ -261,29 +313,9 @@ export class ClosureType extends Type {
     ReturnType: Type
     constructor(paramTypes: Type[], returnType: Type) { // function is never mutable, and never moved.
         super()
-        this.checkValidParamAndReturnTypes(paramTypes, returnType)
         this.ParamTypes = paramTypes
         this.ReturnType = returnType
         this.TypeName = "closure"
-    }
-
-    checkValidParamAndReturnTypes(paramTypes: Type[], returnType: Type) {
-        // Only allow function to take in at most a single param type if returnType is RefType
-        if (returnType instanceof RefType) {
-            let found: boolean = false
-            for (const type of paramTypes) {
-                if (type instanceof RefType) {
-                    if (found) {
-                        print_or_throw_error("Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.")
-                    }
-
-                    if (!compare_type(type, returnType)) {
-                        print_or_throw_error("Type error in ClosureType construction; Returned ref must have same type as argument ref.")
-                    }
-                    found = true
-                }
-            }
-        }
     }
 
     clone() {
@@ -324,6 +356,7 @@ export class ImmutableRefType extends RefType {
     constructor(innerType: Type) {
         super()
         this.InnerType = innerType
+        this.TypeName = "immutableRefType"
     }
 
     clone() {
@@ -335,6 +368,8 @@ export class MutableRefType extends RefType {
     constructor(innerType: Type,) {
         super()
         this.InnerType = innerType
+        this.TypeName = "mutableRefType"
+
     }
     mark_moved() {
         super.mark_moved()
@@ -440,6 +475,9 @@ export const unparse_type = (t: Type): string => {
         throw new Error(`[unparse_type] ${JSON.stringify(t)} is not an instance of Type. }`);
     }
 
+    // Get IsTemporary status
+    // const temp_str: string = t.IsTemporary ? "___temp" : ""
+
     // Get borrow status
     // Returns "_&mut" if mutable borrow exists
     // Returns "_&_<n>" where n is the number of immutable borrows if immutable borrow exists
@@ -447,7 +485,7 @@ export const unparse_type = (t: Type): string => {
 
     if (t.MutableBorrowExists) {
         borrow_str = "___&mut";
-    }  
+    }
     
     if (t.ImmutableBorrowCount > 0) {
         borrow_str += "___&_" + t.ImmutableBorrowCount;

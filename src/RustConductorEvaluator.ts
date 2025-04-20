@@ -4,7 +4,7 @@ import { CharStream, CommonTokenStream } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer.js';
 import { RustParser } from './parser/src/RustParser.js';
 import { RustCompiler } from "./CompilerRust.js";
-import { RustTypeChecker } from "./TypeCheckerRust.js";
+import { RustTypeChecker, VisualisationPoints } from "./TypeCheckerRust.js";
 import { RustVirtualMachine } from "./VirtualMachineRust.js";
 
 export class RustConductorEvaluator extends BasicEvaluator {
@@ -34,7 +34,8 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const tree = parser.crate();
 
             // Typecheck
-            this.typeChecker.check(tree); // throws error if type error found
+            this.typeChecker.check(tree, false); // throws error if type error found
+            const te_visualisation: string = this.typeChecker.getVisualisation(VisualisationPoints.BORROWS_AND_MOVES);
 
             // Compile
             const instructions: object[] = this.compiler.compile(tree);
@@ -43,7 +44,7 @@ export class RustConductorEvaluator extends BasicEvaluator {
             const result = this.VM.execute(instructions);
             
             // Send the result to the REPL
-            this.conductor.sendOutput(`${result}`);
+            this.conductor.sendOutput(`${result}\n -------------------------------------------- \nVisualisation of Borrow and Move States: \n${te_visualisation}`);
 
         }  catch (error) {
             // Handle errors and send them to the REPL
