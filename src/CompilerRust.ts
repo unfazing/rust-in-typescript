@@ -520,10 +520,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             LHS = LHS.expression()
         }
         
-        if (LHS instanceof DereferenceExpressionContext) {
+        if (LHS instanceof DereferenceExpressionContext || LHS instanceof IndexExpressionContext) {
             log(`ASSIGNING A DEREF: ${LHS.getText()}`, "ASSIGNMENT_EXPRESSION")
 
-            // dereference the LHS
+            // dereference the LHS or loads the address of the indexed element onto OS
             this.visit(LHS);
 
             // do a deref assignment
@@ -541,13 +541,6 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
                 pos: ce.compile_time_environment_position(symbol),
             };
         
-        } else if (LHS instanceof IndexExpressionContext) {
-            // loads the address of the indexed element onto OS
-            this.visit(LHS) 
-
-            instrs[wc++] = {
-                tag: "ASSIGN_DEREF", 
-            };
         } else {
             throw new Error("Compilation error in Assignment; LHS does not support assignment")
         }
@@ -932,7 +925,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`EXPR: ${ctx.expression()}`, "LET_STATEMENT")
 
         instrs[wc++] = {
-            tag: "COPY_OR_MOVE", 
+            tag: "ASSIGN", 
             pos: ce.compile_time_environment_position(symbol),
         };
         
@@ -959,7 +952,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         log(`EXPR: ${ctx.expression()}`, "CONSTANT_ITEM")
         
         instrs[wc++] = {
-            tag: "COPY_OR_MOVE", 
+            tag: "ASSIGN", 
             pos: ce.compile_time_environment_position(symbol),
         };
     }

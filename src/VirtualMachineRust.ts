@@ -105,9 +105,6 @@ class Stack {
 	private FP: number;				// Frame Pointer: points to the start of the current frame
 
 	// Canonical values = SINGLETONS
-	// public TRUE: number;
-	// public FALSE: number;
-	// public UNIT: number;
 	public UNASSIGNED: number;
 
 	private temps_marker_stack = [] // stack of addresses to pop all temp variables
@@ -132,15 +129,10 @@ class Stack {
 
 	
 	/**
-	 * We allocate canonical values for true, false, unit (undefined), unassigned
+	 * We allocate canonical values for unassigned
 	 * and make sure no such values are created at runtime
 	 */
 	init_Canonicals() {
-		// boolean values carry their value (0 for false, 1 for true)
-		// in the byte following the tag
-		// this.FALSE = STACK.allocate_False();
-		// this.TRUE = STACK.allocate_True();
-		// this.UNIT = STACK.allocate_Unit();
 		this.UNASSIGNED = STACK.allocated_Unassigned()
 	}
 
@@ -163,7 +155,7 @@ class Stack {
             "Pointer"
         );
 
-        for (let addr = this.start_addr; addr < this.start_addr + 30; addr++) {
+        for (let addr = this.start_addr; addr < this.start_addr + 50; addr++) {
             const actual_addr = this.convert_to_actual_addr(addr);
             const word_start = actual_addr * word_size;
             
@@ -206,6 +198,8 @@ class Stack {
 		return address % this.start_addr;
 	}
 
+	// ============================= MEM COPY METHODS ==============================================
+
 	set_raw_word(address: number, raw_word: bigint) {
 		const actual_address = this.convert_to_actual_addr(address);
 		this.stack.setBigUint64(actual_address * word_size, raw_word);
@@ -230,7 +224,7 @@ class Stack {
 		if (this.is_out_of_range(target_addr)) {
 			throw new Error("Runtime Error; [STACK::shallow_copy] target_addr is out of range. Is it really a stack address?")
 		}
-			
+							
 		// copy words as raw 64-bit (8 bytes) chunks
 		for (let i = 0; i < words; i++) {
 			
@@ -251,14 +245,6 @@ class Stack {
 		const target_size: number = this.get_size(target_address);
 		const target_tag: number = this.get_tag(target_address);
 
-		// if (target_tag === Reference_tag) {
-			// check if underlying address of borrow is on stack and is greater than SP. throw error
-			// const underlying_addr: number = STACK.get_Reference_target(target_address)
-			// if (is_stack_address(underlying_addr) && underlying_addr > this.SP ) {
-			// 	throw new Error("Runtime error; [STACK::create_copy] Creating a copy of a borrow whose underlying value is in invalid stack memory region.")
-			// }
-		// }
-
 		const destination_address = this.allocate(target_tag, target_size);
 		const words: number = this.get_size(target_address);
 
@@ -267,6 +253,18 @@ class Stack {
 		return destination_address;
 	}
 
+	allocate_Temp_marker() {
+		this.temps_marker_stack.push(this.SP);
+	}
+
+	cleanup_Temps() {
+		const marker: number = this.temps_marker_stack.pop();	
+		this.free_heap_allocated_memory(marker);
+		this.SP = marker; // pop stack temps
+	}
+
+	// ============================= STACK ALLOCATION, GET, SET METHODS ==============================================
+	
 	// stack word: [1 byte tag, 4 unused bytes, 2 bytes size, 1 unused byte]
 	// allocate "size" number of words on the stack
 	allocate(tag: number, size: number) {
@@ -322,10 +320,11 @@ class Stack {
     }
 
     get_size(address: number) {
-		const actual_address = this.convert_to_actual_addr(address);
 		if (STACK.get_tag(address) === Array_tag) {
 			return STACK.get_Array_len(address) * STACK.get_Array_element_size(address) + 2
 		}
+
+		const actual_address = this.convert_to_actual_addr(address);
         return this.stack.getUint16(actual_address * word_size + size_offset); 
     }
 
@@ -654,43 +653,7 @@ class Stack {
 	 * valid (unmoved) stack pointers
 	 */
 	free_heap_allocated_memory(starting_addr: number) {
-		// let x: string =  "a" + "b";
 		
-		// stack mem before cleanup:
-		// 0: [placeholder of x]
-		// 1: "a" -> which points to "a" on heap
-		// 2: "b" -> which points to "b" on heap
-		// 3: "ab" -> which points to "ab" on 
-		// 4: stack pointer
-		
-		// stack mem after coping result to placeholder
-		// 0: copy of "ab"
-		// 1: "a" -> which points to "a" on heap [!artifacts]
-		// 2: "b" -> which points to "b" on heap [!artifacts]
-		// 3: "ab" -> which points to "ab" on heap [!artifacts]
-		// 4: stack pointer
-
-		// stack mem after cleanup
-		// 0: copy of "ab"
-		// 1: stack pointer
-
-
-		// let x: string = f();
-		
-		
-		// stack mem during function call:
-		// 0: [placeholder of x]
-		// 1: CallFrame of f
-		// 2: string value of f()
-		// 3: -----------> stack pointer
-
-		
-		// stack mem after function call:
-		// 0: [placeholder of x]
-		// 1: CallFrame of f ---------> stack pointer
-		// 2: string value of f()
-
-	
 		// the address at the top of the OS is the object we are moving out of scope!
 		const address_on_OS = peek(OS, 0); // case where RHS is a call or block expr
 		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
@@ -788,18 +751,8 @@ class Stack {
 	get_Array_element_size(address): number {
 		return this.get_4_bytes_at_offset(address + 1, 4);
 	}
-
-	allocate_Temp_marker() {
-		this.temps_marker_stack.push(this.SP);
-	}
-
-	cleanup_Temps() {
-		const marker: number = this.temps_marker_stack.pop();
-		this.free_heap_allocated_memory(marker); // deallocate any heap temps
-		this.SP = marker; // pop stack temps
-	}
 }
-
+	
 class Heap {
 	// Only String, Env and Env Frame nodes are allocated on Heap
 	private heap: DataView;
@@ -1666,37 +1619,12 @@ const microcode = {
 		push(OS, addr); 
 	},
 	STACK_ALLOCATE: (instr) => {
-		// ensures no unused/temp artifacts on the stack
 		const address = STACK.allocate(Unassigned_tag, instr.size);
 		HEAP.setEnvValue(E, instr.pos, address);
 
 		// create marker to pop temp operands later
 		STACK.allocate_Temp_marker();
 	}, 
-	COPY_OR_MOVE: (instr) => {
-		const RHS_address = OS.pop();
-		const LHS_address = HEAP.getEnvValue(E, instr.pos); // allocated position for this variable on the stack
-		
-		if (!STACK.compare_tag(LHS_address, Unassigned_tag)) { // Sanity check
-			throw new Error("Runtime Error; [instr: COPY_OR_MOVE] LHS must be unassigned during let/const declaration.")
-		} 
-		
-		const words: number = STACK.get_size(RHS_address);
-		STACK.shallow_copy(LHS_address, RHS_address, words);
-
-		if (STACK.is_heap_allocated_type(RHS_address)) {
-			// Implementing MOVE trait
-			STACK.mark_moved(RHS_address);			
-		}
-
-		// POP temp values
-		STACK.cleanup_Temps()
-
-		// finally, push unit value on OS, 
-		// because an assignment expression 
-		// always has Unit value in Rust
-		push(OS, STACK.allocate_Unit())
-	},
 	ASSIGN_MARKER: (instr) => {
 		STACK.allocate_Temp_marker();
 	},
@@ -1718,11 +1646,9 @@ const microcode = {
 			HEAP.freeMem(heap_addr);			
 		}
 		
-		const words: number = STACK.get_size(RHS_address);
-		// We should perform shallow copy from RHS to LHS, since 
-		// RHS value may go out of scope.
-		STACK.shallow_copy(LHS_address, RHS_address, words);
+		const words_to_copy: number = STACK.get_size(RHS_address);
 		
+		STACK.shallow_copy(LHS_address, RHS_address, words_to_copy);
 		if (STACK.is_heap_allocated_type(RHS_address)) {
 			// Implementing MOVE trait
 			STACK.mark_moved(RHS_address);			
@@ -1752,10 +1678,7 @@ const microcode = {
 			HEAP.freeMem(heap_addr);			
 		}
 		
-		// We should perform shallow copy from RHS to LHS, since 
-		// RHS value may go out of scope.
 		const words: number = STACK.get_size(RHS_address);
-
 		STACK.shallow_copy(LHS_address, RHS_address, words);
 		
 		if (STACK.is_heap_allocated_type(RHS_address)) {
@@ -1863,10 +1786,13 @@ const microcode = {
 		STACK.pop_Callframe(); 
 	},
                 
-
 	ARRAY_PLACEHOLDER: (instr) => {
-		const size: number = instr.length * instr.elementSize + 2 // 2 === size of array node
-		const array_placeholder_addr = STACK.allocate(Unassigned_tag, size)
+		const array_placeholder_addr = STACK.allocate_Array(instr.length, instr.elementSize)
+		
+		// preallocate mem for elements
+		const size: number = instr.length * instr.elementSize
+		STACK.allocate(Unassigned_tag, size) 
+
 		push(OS, array_placeholder_addr)
 	},
 
@@ -1889,9 +1815,6 @@ const microcode = {
 		push(OS, array_placeholder_addr)
 	},
 
-	// &1
-	// 
-
 	ARRAY: (instr) => {
 		// OS currently has [array_placeholder_addr, elem_n_addr, elem_n-1 addr, ... elem_1_addr] 
 		// elements are in reverse order on OS
@@ -1900,20 +1823,22 @@ const microcode = {
 		for (let i = 0; i < instr.length; i++) {
 			element_addrs.push(OS.pop()) // values are in correct order in `element_addrs` array
 		}
-		const array_placeholder_addr: number = OS.pop()
 
+		const array_placeholder_addr: number = peek(OS, 0)
+		
 		// copy or move the values over to the placeholder block of memory
-		STACK.set_SP_to_addr(array_placeholder_addr)
-		STACK.allocate_Array(instr.length, instr.elementSize)
+		let addr_pointer: number = array_placeholder_addr + 2 // 2 === size of array tag
 		for (const element_addr of element_addrs) {
-			STACK.create_copy(element_addr)
+			const element_size = STACK.get_size(element_addr);
+			STACK.shallow_copy(addr_pointer, element_addr, element_size)
+
+			// prevent double free + use after free during cleanups
 			if (STACK.is_heap_allocated_type(element_addr)) {
-				// Implementing MOVE trait
 				STACK.mark_moved(element_addr);
 			}
-		}
 
-        push(OS, array_placeholder_addr)
+			addr_pointer += element_size
+		}
 	},
 
 	ARRAY_INDEX: (instr) => {
@@ -2001,8 +1926,8 @@ function run(instrs) {
 
 	HEAP.freeStringPool()
 
-	console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
-	console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
+	// console.log("Heap nodes automatically freed during execution of env: " + HEAP.n_nodes_freed)
+	// console.log("Heap nodes leaked at end of execution: " + HEAP.n_nodes_used)
 	if (HEAP.n_nodes_used > 0) {
 		throw new Error(`Runtime error; Memory leak! ${HEAP.n_nodes_used} heap nodes are not freed`)
 	}
