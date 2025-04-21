@@ -753,3 +753,24 @@ fn main() -> &mut string {
     return x_ref;
 }
     `, "Type error in FunctionType construction; Function must have at least one reference type as lifetime annotation not supplied/supported.", "Invalid - Function returning a reference to a local variable")
+
+
+test_typechecker(`
+    fn main() {
+        fn foo(a: string) -> string {a}
+        let mut x: string = "123";
+        let mut y: string = foo(x);
+        y = "456";
+    }
+        `, "", "Valid - Function returning a variable")
+
+
+test_typechecker(`
+    fn main() {
+        fn foo(a: string) -> string {a}
+        let mut x: string = "123";
+        let mut y: string = foo(x);
+        y = "456";
+        x = "789";
+    }
+        `, "Type error in pathExpression; use of a moved variable", "Invalid - Variable considered move even if returned from function.")

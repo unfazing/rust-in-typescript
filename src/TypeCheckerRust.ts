@@ -849,10 +849,8 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                             `'${ctx.callParams().expression(i).getText()}' is being returned as a mutable borrow from a call of '${ctx.expression().getText()}'. Borrow Status: ${type.InnerType.ImmutableBorrowCount} immutable borrow(s), ${type.InnerType.MutableBorrowExists ? 1 : 0} mutable borrow.`
                         )
                     }
-                    // type.IsMoved = false
-                    let res: Type = type.clone()
-                    res.IsMoved = false
-                    return res
+
+                    return type.clone()
                 }
             }
             this.print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`, ctx)
@@ -863,8 +861,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // saved in environment is not destructively modified during ownership moving.
         // e.g. x = f(), y = x;
         const return_type_original = fun_type.ReturnType
-        // const return_type_clone = Object.assign(Object.create(Object.getPrototypeOf(return_type_original)), return_type_original)
-        const return_type_clone = return_type_original.clone() 
+        const return_type_clone = return_type_original.clone()
         return return_type_clone; 
 
     }
