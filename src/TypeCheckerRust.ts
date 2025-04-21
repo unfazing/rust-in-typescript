@@ -373,12 +373,12 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         if (ctx.INTEGER_LITERAL()) {
             return Number(ctx.getText())
         }
-        this.print_or_throw_error(`Type error; [getIntegerLiteral] Array length/index literal is not an integer.`, ctx)
+        this.print_or_throw_error(`Type error; [getIntegerLiteral] Array length/index literal is not a non-zero integer.`, ctx)
     }
 
     /**
      * Semantically, "canBeMoved" <=> "doesNotImplementCopyTrait".
-     * ImmutableRefTypes and ScalarTypes have copy trait, thus ownership is not moved. Closures have no owners.
+     * ImmutableRefTypes and ScalarTypes have copy trait, thus ownership is not moved. Closur-es have no owners.
      * Array types are implement copy trait only if element type implements copy trait.
      */
     canBeMoved(type: Type): boolean {
@@ -1161,8 +1161,13 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     visitIndexExpression(ctx: IndexExpressionContext): Type {
         const index: number = this.getIntegerLiteral((ctx.expression(1).getChild(0) as LiteralExpressionContext))
         const array_type: Type = this.visit(ctx.expression(0))
+        const array_size: number = (array_type as ArrayType).ContainedTypes.length
         if (!(array_type instanceof ArrayType)) {
             this.print_or_throw_error(`Type error in index expression; Attempting to index a variable of type ${unparse_type(array_type)}`, ctx)
+        }
+
+        if (index < 0 || index >= array_size) {
+            this.print_or_throw_error(`Type error in index expression; Invalid index for array of size ${array_size}.`, ctx)
         }
 
         return (array_type as ArrayType).ContainedTypes[index]
@@ -1214,6 +1219,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     visitArrayType(ctx: ArrayTypeContext): Type {
         const containedType: Type = this.visit(ctx.type_())
         const size: number = this.getIntegerLiteral((ctx.expression().getChild(0) as LiteralExpressionContext))
+
         let types: Type[] = []
         for (let i =0; i < size; i++) {
             types.push(containedType.clone())
@@ -1456,6 +1462,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     
         let expected_type: Type = this.visit(ctx.type_());
         expected_type.IsMutable = is_mut;
+        // note: we do not need to copy over the borrow status for `expected_type` as there is no move allowed if a borrow exists 
 
         // allow variable shadowing (reassignment of symbol) [#DESIGN]
         this.te.add_symbol_to_current_frame(symbol, expected_type);
