@@ -62,8 +62,8 @@ export class TypeEnvironment {
             // found symbol in current frame, terminate early
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
-                if (must_be_closure && !(type_found instanceof ClosureType)) {
-                    throw new Error(`Type error in pathExpression; [lookup_type] Variable '${x}' is from an outer scope.`)
+                if (must_be_closure && !(type_found instanceof FunctionType)) {
+                    throw new Error(`Type error; [lookup_type] Variable '${x}' is from an outer scope.`)
                 }
                 return type_found
             }
@@ -79,7 +79,7 @@ export class TypeEnvironment {
             return this.global_type_frame.frame[x]
         }
 
-        throw new Error(`Type error in pathExpression; [lookup_type] Unbound variable '${x}'.`)
+        throw new Error(`Type error; [lookup_type] Unbound variable '${x}'.`)
     }
 
     // extend the environment destructively 
@@ -191,6 +191,7 @@ export class TypeEnvironment {
     }
 }
 
+// Type frames are JavaScript objects that map symbols (strings) to Types.
 export abstract class TypeFrame {
     frame: {[key:string]: Type}
     annotation: string
@@ -224,22 +225,11 @@ export class BlockTypeFrame extends TypeFrame {
     }
 }
 
-// Type frames are JavaScript objects that map 
-// symbols (strings) to types.
 
-// Type environment is a stack implemented with array 
-// const empty_type_environment = []
-// export const global_type_environment: TypeEnvironment = new TypeEnvironment()
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
 export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array" | "immutableRefType" | "mutableRefType"
 
-// Type is a class
-// TypeName is a string. 
-// In closures and references, the typename is automatically set to "closure"/"refType" on construction.
-// In scalars, the typename is the rust type, e.g. "i32"
-// t.Mutable is only meaningful for declared variables. e.g. let mut x: &i32; --> <ImmutableRefType>.Mutable = True
-// Otherwise, t.Mutable can be 'undefined' e.g. 3; --> <ScalarType>.Mutable = undefined
 export abstract class Type {
     TypeName: TypeName
     IsMutable: boolean
@@ -308,7 +298,7 @@ export class UnitType extends Type {
     }
 }
 
-export class ClosureType extends Type {
+export class FunctionType extends Type {
     ParamTypes: Type[]
     ReturnType: Type
     constructor(paramTypes: Type[], returnType: Type) { // function is never mutable, and never moved.
@@ -319,7 +309,7 @@ export class ClosureType extends Type {
     }
 
     clone() {
-        return new ClosureType(this.clone_types(this.ParamTypes), this.ReturnType.clone())
+        return new FunctionType(this.clone_types(this.ParamTypes), this.ReturnType.clone())
     }
 }
 
@@ -412,9 +402,9 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
     }
 
     // Compare Closures
-    if (t1 instanceof ClosureType) {
-        return compare_types(t1.ParamTypes, (t2 as ClosureType).ParamTypes) 
-            && compare_type(t1.ReturnType, (t2 as ClosureType).ReturnType);
+    if (t1 instanceof FunctionType) {
+        return compare_types(t1.ParamTypes, (t2 as FunctionType).ParamTypes) 
+            && compare_type(t1.ReturnType, (t2 as FunctionType).ReturnType);
     }
 
     // Compare References
@@ -513,7 +503,7 @@ export const unparse_type = (t: Type): string => {
     }
     
     // Handle closure types
-    if (t instanceof ClosureType) {
+    if (t instanceof FunctionType) {
         const params = t.ParamTypes.map(unparse_type).join(', ');
         const return_type = unparse_type(t.ReturnType);
         return moved_str + `fn(${params}) -> ${return_type}${borrow_str}`;

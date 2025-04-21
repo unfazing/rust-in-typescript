@@ -11,7 +11,7 @@ fn main() {
     let mut original: string = "123";
     let borrowed: & & string = borrow_string(original);
 }
-`, "Type error in ClosureType construction; Returned ref must have same type as argument ref.", "Invalid - Function must return the same reference it took in.")
+`, "Type error in FunctionType construction; Returned ref must have same type as argument ref.", "Invalid - Function must return the same reference it took in.")
 
 
 test_typechecker(`
@@ -178,7 +178,7 @@ fn main() -> () {
     let x_ref_2 : &mut string = x_ref;
     *x_ref;
 }
-`, "Type error in pathExpression; use of a moved value:", "Invalid - Use of Moved Mutable Reference");
+`, "Type error in pathExpression; use of a moved variable", "Invalid - Use of Moved Mutable Reference");
 
 
 // Immutable reference is not moved
@@ -190,6 +190,17 @@ fn main() -> () {
     *x_ref;
 }
 `, "", "Valid - Immutable Reference Creation and Dereference (String)");
+
+
+test_typechecker(`
+    fn main() -> () {
+        let x : string = (("2"));
+        let y : string = (((x) + "123"));
+        fn f(a: string) {}
+        f((x));
+    }
+    `, "", "Valid - Weird Parentheses cases");
+
 
 
 // Assignment to immutable reference
@@ -213,7 +224,7 @@ fn main() {
 
     foo();
 }
-`, "Type error in pathExpression; [lookup_type] Variable 'x' is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
+`, "Type error; [lookup_type] Variable 'x' is from an outer scope.", "Invalid - Lookup Variable From Outer Scope")
 
 
 test_typechecker(`
@@ -342,7 +353,7 @@ fn main() {
         return a;
     }
 }
-`, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Function with Multiple Mutable Reference Parameters")
+`, "Type error in FunctionType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Function with Multiple Mutable Reference Parameters")
 
 
 test_typechecker(`
@@ -368,9 +379,9 @@ fn main() {
     foo(x_ref); // returns x_ref, so x considered to still have existing mutableborrow
     let mut x_ref_2: &mut string = &mut x;
 }
-`, "Type error in pathExpression; use (read/write) of a mutably borrowed value", "Invalid - Simultaneous Mutable Borrows")
+`, "Type error in pathExpression; use of a mutably borrowed variable", "Invalid - Simultaneous Mutable Borrows")
 
-
+// QUIRK: rust allows
 test_typechecker(`
 fn main() {
     fn foo(a: &mut string) -> &mut string {
@@ -381,6 +392,21 @@ fn main() {
     x_ref = foo(x_ref); // cannot assign to moved value
 }
 `, "Type error in assignment; Cannot assign to a moved value.", "Invalid - Reassigning Moved Mutable Reference")
+
+
+// QUIRK: rust allows
+test_typechecker(`
+fn main() {
+    fn foo(a: &mut string) -> &mut string {
+        return a;
+    }
+    let mut x: string = "123";
+    let mut x_ref: &mut string = &mut x;
+    foo(x_ref); // move x_ref
+    x_ref = &mut x; // illegal
+}
+`, "Type error in pathExpression; use of a moved variable", "Invalid - Using a moved reference variable")
+    
 
 
 test_typechecker(`
@@ -394,7 +420,7 @@ fn main() {
     let mut temp_string: string = "test";
     x_ref = &mut temp_string; // use moved value
 }
-`, "Type error in pathExpression; use of a moved value", "Invalid - Use of Moved Mutable Reference After Function Call")
+`, "Type error in pathExpression; use of a moved variable", "Invalid - Use of Moved Mutable Reference After Function Call")
 
 
 test_typechecker(`
@@ -444,21 +470,21 @@ fn main() {
     // function cant take in more than one ref if return ref
     fn apply_function(func: fn(&i32, &i32) -> &i32) {}
 }
-`, "Type error in ClosureType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Higher-Order Function with Multiple Reference Arguments")
+`, "Type error in FunctionType construction; Function parameter can only have one reference type as lifetime annotation not supplied/supported.", "Invalid - Higher-Order Function with Multiple Reference Arguments")
 
 
 test_typechecker(`
 fn main() {
     fn apply_function(func: fn(&i32) -> &mut i32) {}
 }
-`, "Type error in ClosureType construction; Returned ref must have same type as argument ref.", "Invalid - Higher-Order Function with Mismatched Reference Types")
+`, "Type error in FunctionType construction; Returned ref must have same type as argument ref.", "Invalid - Higher-Order Function with Mismatched Reference Types")
 
 
 test_typechecker(`
 fn main() {
     abc = 10;
 }
-`, "Type error in pathExpression; [lookup_type] Unbound variable", "Invalid - Assigning to Unbound Variable")
+`, "Type error; [lookup_type] Unbound variable", "Invalid - Assigning to Unbound Variable")
 
 
 test_typechecker(`
@@ -466,7 +492,7 @@ fn main() {
     let x: i32 = 123;
     *x;
 }
-`, "Type error; dereferencing a non-reference type: i32", "Invalid - Dereferencing Non-Reference Type")
+`, " Type error in deferencing; attempting to dereference a non-reference type", "Invalid - Dereferencing Non-Reference Type")
 
 
 test_typechecker(`
@@ -577,7 +603,7 @@ fn main() {
     let mut arr3: [string; 1] = arr;
 
 }
-`, "Type error in pathExpression; use of a moved value:", "Invalid - Move non-copy arrays multiple times")
+`, "Type error in pathExpression; use of a moved variable", "Invalid - Move non-copy arrays multiple times")
 
 
 test_typechecker(`
