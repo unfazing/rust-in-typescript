@@ -582,9 +582,10 @@ test_VM(`
             y
         }
         let x: i32 = 0;
-        copy(x);
-        x
-    }`, 0, "VM - Function calls - Copy arguments");
+        copy(x);    // pass a copy
+        x           // should not change
+
+    }`, 0, "VM - Function call - Copy arguments");
 
 test_VM(`
     fn main() -> string {
@@ -592,8 +593,19 @@ test_VM(`
             return y + " world";
         }
         let x: string = "hello";
-        mover(x) 
-    }`, "hello world", "VM - Function calls - Move arguments");
+        mover(x)    // ownership moved into function
+
+    }`, "hello world", "VM - Function call - Move arguments");
+
+test_VM(`
+    fn main() -> f64 {
+        fn get_second_element(arr: [f64; 3]) -> f64 {
+            return arr[1];
+        }
+        let array: [f64; 3] = [1.0, 2.0, 3.0];
+        get_second_element(array) 
+
+    }`, 2.0, "VM - Function call - Copy array as argument");
 
 test_VM(`
     fn main() -> i32 {

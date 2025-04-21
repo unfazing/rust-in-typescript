@@ -242,12 +242,13 @@ class Stack {
 	 * @returns 
 	 */
 	allocate_copy_at_current_SP(target_address: number): number {
-		const target_size: number = this.get_size(target_address);
 		const target_tag: number = this.get_tag(target_address);
 
-		const destination_address = this.allocate(target_tag, target_size);
-		const words: number = this.get_size(target_address);
+		const words: number = target_tag === Array_tag 
+			? this.get_Array_size(target_address)
+			: this.get_size(target_address);
 
+		const destination_address = this.allocate(target_tag, words);
 		this.shallow_copy(destination_address, target_address, words);
 
 		return destination_address;
@@ -1531,7 +1532,6 @@ const microcode = {
 			HEAP.setChild(frame_address, i, parameter_addr);
 		}
 		
-		
 		OS.pop(); // pop fun
 		
 		E = HEAP.extendEnvironment(
@@ -1548,6 +1548,8 @@ const microcode = {
 			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
 		
+		// don't push allocate call frame
+
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
 			const argument_addr: number = OS.pop();
@@ -1559,8 +1561,6 @@ const microcode = {
 		}
 
 		OS.pop(); // pop fun
-
-		// don't push on RTS here
 
 		// increment number of tail calls to free the extended env later
 		HEAP.numTailCalls += 1
