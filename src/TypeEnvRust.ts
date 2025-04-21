@@ -56,21 +56,21 @@ export class TypeEnvironment {
     // lookup all environment frames, starting from the most recent
     // returns the type of the symbol if it exists, else return undefined
     lookup_type(x: string): Type {
-        let must_be_closure: boolean = false;
+        let must_be_fn: boolean = false;
         for (let i = this.type_environment.length - 1; i >= 0; i--) { 
 
             // found symbol in current frame, terminate early
             if (this.type_environment[i].frame.hasOwnProperty(x) ) {
                 const type_found: Type = this.type_environment[i].frame[x] 
-                if (must_be_closure && !(type_found instanceof FunctionType)) {
+                if (must_be_fn && !(type_found instanceof FunctionType)) {
                     throw new Error(`Type error; [lookup_type] Variable '${x}' is from an outer scope.`)
                 }
                 return type_found
             }
 
             if (this.type_environment[i] instanceof FunctionTypeFrame) {
-                // once encountered nearest function frame, can only return closure
-                must_be_closure = true 
+                // once encountered nearest function frame, can only return function
+                must_be_fn = true 
             }
         }
 
@@ -228,7 +228,7 @@ export class BlockTypeFrame extends TypeFrame {
 
 
 export type ScalarTypeName = "i32" | "f64" | "bool" | "char" | "UNKNOWN"
-export type TypeName = ScalarTypeName | "closure" | "refType" | "unit" | "returnType" | "string" | "array" | "immutableRefType" | "mutableRefType"
+export type TypeName = ScalarTypeName | "function" | "refType" | "unit" | "returnType" | "string" | "array" | "immutableRefType" | "mutableRefType"
 
 export abstract class Type {
     TypeName: TypeName
@@ -305,7 +305,7 @@ export class FunctionType extends Type {
         super()
         this.ParamTypes = paramTypes
         this.ReturnType = returnType
-        this.TypeName = "closure"
+        this.TypeName = "function"
     }
 
     clone() {
@@ -401,7 +401,7 @@ export const compare_type = (t1: Type, t2: Type): boolean => {
         return compare_type(t1.ReturnedType, (t2 as ReturnType).ReturnedType)
     }
 
-    // Compare Closures
+    // Compare Functions
     if (t1 instanceof FunctionType) {
         return compare_types(t1.ParamTypes, (t2 as FunctionType).ParamTypes) 
             && compare_type(t1.ReturnType, (t2 as FunctionType).ReturnType);
@@ -502,7 +502,7 @@ export const unparse_type = (t: Type): string => {
         return moved_str + `${ref_str}${unparse_type(t.InnerType)}${borrow_str}`;
     }
     
-    // Handle closure types
+    // Handle Function types
     if (t instanceof FunctionType) {
         const params = t.ParamTypes.map(unparse_type).join(', ');
         const return_type = unparse_type(t.ReturnType);

@@ -381,7 +381,7 @@ fn main() {
 }
 `, "Type error in pathExpression; use of a mutably borrowed variable", "Invalid - Simultaneous Mutable Borrows")
 
-// QUIRK: rust allows
+
 test_typechecker(`
 fn main() {
     fn foo(a: &mut string) -> &mut string {
@@ -389,9 +389,9 @@ fn main() {
     }
     let mut x: string = "123";
     let mut x_ref: &mut string = &mut x;
-    x_ref = foo(x_ref); // cannot assign to moved value
+    x_ref = foo(x_ref); // foo returns x_ref
 }
-`, "Type error in assignment; Cannot assign to a moved value.", "Invalid - Reassigning Moved Mutable Reference")
+`, "", "Valid - Reassigning Mutable Reference to Function Return")
 
 
 // QUIRK: rust allows
@@ -744,3 +744,12 @@ fn main() {
     let test: string = *arr[2];
 }
 `, "Type error in let statement; cannot move a borrowed value", "Invalid - Move a borrowed non copy string out of an array")
+
+
+test_typechecker(`
+fn main() -> &mut string {
+    let mut x: string = "123";
+    let mut x_ref: &mut string = &mut x;
+    return x_ref;
+}
+    `, "Type error in FunctionType construction; Function must have at least one reference type as lifetime annotation not supplied/supported.", "Invalid - Function returning a reference to a local variable")

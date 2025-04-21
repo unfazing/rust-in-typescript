@@ -362,6 +362,9 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                     found = true
                 }
             }
+            if (!found) {
+                this.print_or_throw_error("Type error in FunctionType construction; Function must have at least one reference type as lifetime annotation not supplied/supported.", ctx)
+            }
         }
     }
 
@@ -508,7 +511,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         }
         
         if (inner_type instanceof FunctionType) {
-            this.print_or_throw_error(`Type error in borrow expression; cannot borrow a closure: ${unparse_type(inner_type)}`, ctx);            
+            this.print_or_throw_error(`Type error in borrow expression; cannot borrow a function: ${unparse_type(inner_type)}`, ctx);            
         }
             
         this.log(`AN ${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW IS BEING CREATED.`, "BORROW_EXPRESSION");
@@ -778,11 +781,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         // Lookup function's Type in type environment by visiting pathExpression node
         const fun_type: Type = this.visit(ctx.expression()) 
 
-        this.log(`EXPECTED CLOSURE TYPE: ${unparse_type(fun_type)}`, "CALL_EXPRESSION");
+        this.log(`EXPECTED FUNCTION TYPE: ${unparse_type(fun_type)}`, "CALL_EXPRESSION");
         
         if (!(fun_type instanceof FunctionType)) {
             this.print_or_throw_error("Type error in application; function application must have function type.", ctx)
-            return new FunctionType([], new UnitType()); // let typescript knows expected_type must be closure
+            return new FunctionType([], new UnitType()); // let typescript knows expected_type must be function
         }
 
         
@@ -846,7 +849,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                             `'${ctx.callParams().expression(i).getText()}' is being returned as a mutable borrow from a call of '${ctx.expression().getText()}'. Borrow Status: ${type.InnerType.ImmutableBorrowCount} immutable borrow(s), ${type.InnerType.MutableBorrowExists ? 1 : 0} mutable borrow.`
                         )
                     }
-                    return type
+                    // type.IsMoved = false
+                    let res: Type = type.clone()
+                    res.IsMoved = false
+                    return res
                 }
             }
             this.print_or_throw_error(`Type error in application; function returns a local borrow (should not reach here, checked in visitFunction_).`, ctx)
@@ -1254,11 +1260,11 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             : new UnitType() 
 
         this.checkValidParamAndReturnTypes(paramTypes, returnType, ctx)
-        const closure: FunctionType = new FunctionType(paramTypes, returnType);
+        let fun_type: FunctionType = new FunctionType(paramTypes, returnType);
 
-        this.log(`BARE FUNCTION HAS TYPE ${unparse_type(closure)}`, "BARE_FUNCTION_TYPE");
+        this.log(`BARE FUNCTION HAS TYPE ${unparse_type(fun_type)}`, "BARE_FUNCTION_TYPE");
 
-        return closure;
+        return fun_type;
     }
 
     // maybeNamedFunctionParameters: maybeNamedParam (COMMA maybeNamedParam)* COMMA?
