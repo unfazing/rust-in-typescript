@@ -96,48 +96,10 @@ function printInstructions(instrs: object[]): undefined {
     console.log(formattedInstructions);
 }
 
-// export const test_VM = (code: string, expectedResult: any, testName?: string, print_instrs?: boolean) => {
-//     console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
-//     console.log(`Code: ${code}`);
-    
-//     try {
-//         const inputStream = CharStream.fromString(code);
-//         const lexer = new RustLexer(inputStream);
-//         const tokenStream = new CommonTokenStream(lexer);
-//         const parser = new RustParser(tokenStream);
-
-//         // Parse the input
-//         const tree = parser.crate();
-
-//         // Typecheck
-//         const typechecker = new RustTypeChecker();
-//         typechecker.check(tree, false);
-
-//         // Compile
-//         const compiler = new RustCompiler();
-//         const instructions = compiler.compile(tree);
-
-//         if (print_instrs) printInstructions(instructions);
-    
-//         const VM = new RustVirtualMachine();
-//         const actualResult = VM.execute(instructions);
-        
-//         console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
-        
-//         if (actualResult === expectedResult) {
-//             console.log("✅ Test Passed");
-//             return true;
-//         } else {
-//             console.log(`❌ Test Failed - Result mismatch - Expected ${expectedResult} but got ${actualResult}`);
-//         }
-//     } catch (error) {
-//         console.log(`❌ Test Failed - ${error.message}`);
-//         console.log(error.stack); // Include stack trace for debugging
-//         return false;
-//     }
-// };
-
 export const test_VM = (code: string, expectedResult: any, testName?: string, print_instrs?: boolean) => {
+    console.log(`\n=== Running Test: ${testName || 'Unnamed Test'} ===`);
+    console.log(`Code: ${code}`);
+    
     try {
         const inputStream = CharStream.fromString(code);
         const lexer = new RustLexer(inputStream);
@@ -156,23 +118,61 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
         const instructions = compiler.compile(tree);
 
         if (print_instrs) printInstructions(instructions);
-
+    
         const VM = new RustVirtualMachine();
         const actualResult = VM.execute(instructions);
-
+        
+        console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
+        
         if (actualResult === expectedResult) {
-            return true; // Silent on success
+            console.log("✅ Test Passed");
+            return true;
         } else {
-            console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
-            console.log(`Code:\n${code}`);
-            console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
-            return false;
+            console.log(`❌ Test Failed - Result mismatch - Expected ${expectedResult} but got ${actualResult}`);
         }
     } catch (error) {
-        console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
-        console.log(`Code:\n${code}`);
-        console.log(`Error message: ${error.message}`)
-        console.log(error.stack);
+        console.log(`❌ Test Failed - ${error.message}`);
+        console.log(error.stack); // Include stack trace for debugging
         return false;
     }
 };
+
+// export const test_VM = (code: string, expectedResult: any, testName?: string, print_instrs?: boolean) => {
+//     try {
+//         const inputStream = CharStream.fromString(code);
+//         const lexer = new RustLexer(inputStream);
+//         const tokenStream = new CommonTokenStream(lexer);
+//         const parser = new RustParser(tokenStream);
+
+//         // Parse the input
+//         const tree = parser.crate();
+
+//         // Typecheck
+//         const typechecker = new RustTypeChecker();
+//         typechecker.check(tree, false);
+
+//         // Compile
+//         const compiler = new RustCompiler();
+//         const instructions = compiler.compile(tree);
+
+//         if (print_instrs) printInstructions(instructions);
+
+//         const VM = new RustVirtualMachine();
+//         const actualResult = VM.execute(instructions);
+
+//         if (actualResult === expectedResult) {
+//             return true; // Silent on success
+//         } else {
+//             console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
+//             console.log(`Code:\n${code}`);
+//             console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
+//             return false;
+//         }
+//     } catch (error) {
+//         console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
+//         console.log(`Code:\n${code}`);
+//         console.log(`Error message: ${error.message}`)
+//         console.log(error.stack);
+//         return false;
+//     }
+// };

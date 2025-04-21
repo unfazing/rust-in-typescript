@@ -1,4 +1,4 @@
-// Generated from src/RustParser.g4 by ANTLR 4.13.1
+// Generated from src/parser/src/RustParser.g4 by ANTLR 4.13.1
 
 import { ErrorNode, ParseTreeListener, ParserRuleContext, TerminalNode } from "antlr4ng";
 

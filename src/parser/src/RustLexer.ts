@@ -1,8 +1,8 @@
-// Generated from src/RustLexer.g4 by ANTLR 4.13.1
+// Generated from src/parser/src/RustLexer.g4 by ANTLR 4.13.1
 
 import * as antlr from "antlr4ng";
 import { Token } from "antlr4ng";
-import RustLexerBase from "./RustLexerBase.js";
+import RustLexerBase from "./RustLexerBase";
 
 
 export class RustLexer extends RustLexerBase {
