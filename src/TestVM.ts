@@ -105,8 +105,6 @@ test_VM(`
     }
     `, undefined, "VM - Create arrays of basic types")
 
-
-
 test_VM(`
     fn main() -> i32{
         let mut arr: [i32 ; 1] = [1];
@@ -117,21 +115,74 @@ test_VM(`
     `, 100, "VM - Assign a i32/&i32 array and its array elements to new variables")
 
 test_VM(`
-    fn main() -> char {
-        let nested_arr1: [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
-        let nested_arr2: [[f64; 2]; 2] = [[1.1, 2.2], [3.3, 4.4]];
-        let nested_arr3: [[bool; 2]; 3] = [[true, false], [false, true], [true, true]];
-        let nested_arr4: [[string; 2]; 2] = [["123", "456"], ["789", "0"]];
-        let nested_arr5: [[char; 3]; 2] = [['a', 'b', 'c'], ['x', 'y', 'z']];
-
-        // Uniform nested arrays using semicolon syntax
-        let nested_arr6: [[i32; 2]; 3] = [[1, 2]; 3];
-        let nested_arr7: [[f64; 1]; 2] = [[3.14]; 2];
-        let nested_arr8: [[bool; 1]; 4] = [[true]; 4];
-        let nested_arr9: [[char; 2]; 2] = [['r', 's']; 2];
-        return nested_arr9[0][1];
+    fn main() -> i32 {
+        let nested_arr: [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+        return nested_arr[1][0];
     }
-    `, 's', "VM - Create nested arrays of basic types")
+`, 4, "VM - Create nested array of i32");
+
+test_VM(`
+    fn main() -> f64 {
+        let nested_arr: [[f64; 2]; 2] = [[1.1, 2.2], [3.3, 4.4]];
+        return nested_arr[0][1];
+    }
+`, 2.2, "VM - Create nested array of f64");
+
+test_VM(`
+    fn main() -> bool {
+        let nested_arr: [[bool; 2]; 3] = [[true, false], [false, true], [true, true]];
+        return nested_arr[2][1];
+    }
+`, true, "VM - Create nested array of bool");
+
+test_VM(`
+    fn main() -> char {
+        let nested_arr: [[char; 3]; 2] = [['a', 'b', 'c'], ['x', 'y', 'z']];
+        return nested_arr[1][2];
+    }
+`, 'z', "VM - Create nested array of char");
+
+test_VM(`
+    fn main() -> string {
+        let nested_arr: [[string; 2]; 2] = [["123", "456"], ["789", "0"]];
+        return nested_arr[1][0];
+    }
+`, '789', "VM - Create nested array of string");
+
+test_VM(`
+    fn main() -> i32 {
+        let filled_arr: [i32; 3] = [42; 3];
+        return filled_arr[2];
+    }
+`, 42, "VM - Create array of i32 using fill syntax");
+
+test_VM(`
+    fn main() -> i32 {
+        let nested_arr: [[i32; 2]; 3] = [[1, 2]; 3];
+        return nested_arr[2][0];
+    }
+`, 1, "VM - Create nested array of i32 using fill syntax");
+
+test_VM(`
+    fn main() -> f64 {
+        let nested_arr: [[f64; 1]; 2] = [[3.14]; 2];
+        return nested_arr[1][0];
+    }
+`, 3.14, "VM - Create nested array of f64 using fill syntax");
+
+test_VM(`
+    fn main() -> bool {
+        let nested_arr: [[bool; 1]; 4] = [[true]; 4];
+        return nested_arr[3][0];
+    }
+`, true, "VM - Create nested array of bool using fill syntax");
+
+test_VM(`
+    fn main() -> char {
+        let nested_arr: [[char; 2]; 2] = [['r', 's']; 2];
+        return nested_arr[0][1];
+    }
+`, 's', "VM - Create nested array of char using fill syntax")
 
 test_VM(`
     fn main() -> i32 {

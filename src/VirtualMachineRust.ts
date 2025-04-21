@@ -11,7 +11,6 @@ function log(message: any, enclosing_function: string): void {
     }
 }
 
-
 /* **********************
  * using arrays as stacks
  * **********************/
@@ -83,10 +82,11 @@ const tagMap = {
  * Memory Configs
  * *************************/
 
-const word_size = 8;
-const node_size = 10;
-const size_offset = 5; // number of offset bytes in the first word (1 byte tag, 4 bytes payload)
-const mega = 2 ** 20;
+const WORD_SIZE = 8;
+const NODE_SIZE = 10;
+const SIZE_OFFSET = 5; // number of offset bytes in the first word (1 byte tag, 4 bytes payload)
+const MEGA = 2 ** 20;
+const STRING_POOL_ACTIVATED = true;
 
 /* *************************
  * Stack
@@ -110,18 +110,18 @@ class Stack {
 	private temps_marker_stack = [] // stack of addresses to pop all temp variables
 
 	constructor(bytes: number, starting_address: number) {
-		if (bytes % word_size !== 0) 
-			throw new Error(`Runtime Error; [STACK::constructor] Stack size must be divisible by ${word_size}`);
+		if (bytes % WORD_SIZE !== 0) 
+			throw new Error(`Runtime Error; [STACK::constructor] Stack size must be divisible by ${WORD_SIZE}`);
 
-		if (starting_address % word_size !== 0) 
-			throw new Error(`Runtime Error; [STACK::constructor] Starting address of stack must be divisible by ${word_size}`)
+		if (starting_address % WORD_SIZE !== 0) 
+			throw new Error(`Runtime Error; [STACK::constructor] Starting address of stack must be divisible by ${WORD_SIZE}`)
 
 		const data = new ArrayBuffer(bytes);
 		const view = new DataView(data);
 		this.stack = view;
 
 		this.start_addr = starting_address;
-		this.end_addr = starting_address + (bytes / word_size)
+		this.end_addr = starting_address + (bytes / WORD_SIZE)
 
 		this.FP = starting_address;
 		this.SP = starting_address;
@@ -143,7 +143,7 @@ class Stack {
 		}
 
         console.log("=== Stack State (Raw Bits) ===");
-        console.log(`Bounds: [${this.start_addr}..${this.end_addr}] (${(this.end_addr - this.start_addr) * word_size} bytes)`);
+        console.log(`Bounds: [${this.start_addr}..${this.end_addr}] (${(this.end_addr - this.start_addr) * WORD_SIZE} bytes)`);
         console.log(`Registers: FP = ${this.FP}, SP = ${this.SP}`);
         console.log("\nMemory Contents:");
 
@@ -157,7 +157,7 @@ class Stack {
 
         for (let addr = this.start_addr; addr < this.start_addr + 50; addr++) {
             const actual_addr = this.convert_to_actual_addr(addr);
-            const word_start = actual_addr * word_size;
+            const word_start = actual_addr * WORD_SIZE;
             
             const tag = this.stack.getUint8(word_start);
             const bits = this.get_word_bits(word_start);
@@ -202,12 +202,12 @@ class Stack {
 
 	set_raw_word(address: number, raw_word: bigint) {
 		const actual_address = this.convert_to_actual_addr(address);
-		this.stack.setBigUint64(actual_address * word_size, raw_word);
+		this.stack.setBigUint64(actual_address * WORD_SIZE, raw_word);
 	}
 
 	get_raw_word(address: number): bigint {
 		const actual_address = this.convert_to_actual_addr(address);
-		return this.stack.getBigUint64(actual_address * word_size);
+		return this.stack.getBigUint64(actual_address * WORD_SIZE);
 	}
 
 	/**
@@ -281,11 +281,11 @@ class Stack {
 		const actual_address = this.convert_to_actual_addr(address);
 
 		// set the first byte to tag
-		this.stack.setUint8(actual_address * word_size, tag);
+		this.stack.setUint8(actual_address * WORD_SIZE, tag);
 
 		// set size
 		// number of children = size - 1
-		this.stack.setUint16(actual_address * word_size + size_offset, size); 
+		this.stack.setUint16(actual_address * WORD_SIZE + SIZE_OFFSET, size); 
 
 		return address;
 	};
@@ -296,13 +296,13 @@ class Stack {
 	// get a word in the stack at given address.
 	get(address: number) {
 		const actual_address = this.convert_to_actual_addr(address);
-		return this.stack.getFloat64(actual_address * word_size);
+		return this.stack.getFloat64(actual_address * WORD_SIZE);
 	}
 
 	// set a word in the stack at given address.
 	set(address: number, x) {
 		const actual_address = this.convert_to_actual_addr(address);
-		this.stack.setFloat64(actual_address * word_size, x);
+		this.stack.setFloat64(actual_address * WORD_SIZE, x);
 	}
 
 	// child index starts at 0
@@ -316,16 +316,18 @@ class Stack {
 
     get_tag(address: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        return this.stack.getUint8(actual_address * word_size);
+        return this.stack.getUint8(actual_address * WORD_SIZE);
     }
 
+	/**
+	 * Returns the size of this node
+	 * 
+	 * @param address 
+	 * @returns 
+	 */
     get_size(address: number) {
-		if (STACK.get_tag(address) === Array_tag) {
-			return STACK.get_Array_len(address) * STACK.get_Array_element_size(address) + 2
-		}
-
 		const actual_address = this.convert_to_actual_addr(address);
-        return this.stack.getUint16(actual_address * word_size + size_offset); 
+        return this.stack.getUint16(actual_address * WORD_SIZE + SIZE_OFFSET); 
     }
 
     get_number_of_children(address: number) {
@@ -335,32 +337,32 @@ class Stack {
 
     set_byte_at_offset(address: number, offset: number, value: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        this.stack.setUint8(actual_address * word_size + offset, value);
+        this.stack.setUint8(actual_address * WORD_SIZE + offset, value);
     }
 
     get_byte_at_offset(address: number, offset: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        return this.stack.getUint8(actual_address * word_size + offset);
+        return this.stack.getUint8(actual_address * WORD_SIZE + offset);
     }
 
     set_2_bytes_at_offset(address: number, offset: number, value: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        this.stack.setUint16(actual_address * word_size + offset, value);
+        this.stack.setUint16(actual_address * WORD_SIZE + offset, value);
     }
 
     get_2_bytes_at_offset(address: number, offset: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        return this.stack.getUint16(actual_address * word_size + offset);
+        return this.stack.getUint16(actual_address * WORD_SIZE + offset);
     }
 
     set_4_bytes_at_offset(address: number, offset: number, value: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        this.stack.setUint32(actual_address * word_size + offset, value);
+        this.stack.setUint32(actual_address * WORD_SIZE + offset, value);
     }
 
     get_4_bytes_at_offset(address: number, offset: number) {
         const actual_address = this.convert_to_actual_addr(address);
-        return this.stack.getUint32(actual_address * word_size + offset);
+        return this.stack.getUint32(actual_address * WORD_SIZE + offset);
     }
 
 	compare_tag(address: number, expected_tag: number) {
@@ -419,12 +421,12 @@ class Stack {
 
 	set_Int32(address: number, x: number) {
 		const actual_address = this.convert_to_actual_addr(address);
-		this.stack.setInt32(actual_address * word_size, x);
+		this.stack.setInt32(actual_address * WORD_SIZE, x);
 	}
 
 	get_Int32(address: number): number {
 		const actual_address = this.convert_to_actual_addr(address);
-		return this.stack.getInt32(actual_address * word_size);
+		return this.stack.getInt32(actual_address * WORD_SIZE);
 	}
 	
 	/**
@@ -661,18 +663,21 @@ class Stack {
 		let addr = starting_addr;
 		while (addr < this.SP) {
 			// console.log(`[STACK::pop_Blockframe] Visiting stack addr ${addr}, tag: ${this.tag_to_string(STACK.get_tag(addr))}`)
+
+			// skip this address if its being moved outside of scope
+			if (address_on_OS === addr) {
+				const size = this.get_tag(address_on_OS) === Array_tag 
+					? this.get_Array_size(addr)
+					: this.get_size(addr)
+				addr = addr + size;
+
+				continue	
+			} 
+			
 			if (this.is_heap_allocated_type(addr) && !this.is_moved(addr)) {
-
 				const heap_addr = this.get_heap_allocated_address(addr)
-
-				// DO NOT FREE MEM IF WE ARE MOVING 
-				// A HEAP-ALLOCATED OBJECT OUT OF THE SCOPE
-				if (is_result_heap_allocated && STACK.get_heap_allocated_address(address_on_OS) === heap_addr) {
-					// do nothing
-				} else {
-					// console.log(`[STACK::pop_Blockframe] Visiting stack pointer at addr ${addr}, freeing ${address_to_Rust_value(addr).val}`)
-					HEAP.freeMem(heap_addr)
-				}
+				// console.log(`[STACK::pop_Blockframe] Visiting stack pointer at addr ${addr}, freeing ${address_to_Rust_value(addr).val}`)
+				HEAP.freeMem(heap_addr)
 			}
 			
 			const size = this.get_size(addr)
@@ -705,6 +710,19 @@ class Stack {
 	get_String(address: number): StringRustValue {
 		const heap_addr = this.get_String_Heap_addr(address)
 		return HEAP.getString(heap_addr);
+	}
+
+	move_recursively(address: number) {
+		if (STACK.get_tag(address) !== Array_tag) {
+			if (STACK.is_heap_allocated_type(address)) {
+				STACK.mark_moved(address);
+			}
+		} else {
+			const elements: number[] = STACK.get_Array_elements(address)
+			for (const element_addr of elements) {
+				this.move_recursively(element_addr)
+			}
+		}
 	}
 
 	mark_moved(address: number): void {
@@ -744,6 +762,12 @@ class Stack {
 		return stack_address;
 	}
 
+	/**
+	 * Returns the number of element in the array
+	 * 
+	 * @param address 
+	 * @returns 
+	 */
 	get_Array_len(address): number {
 		return this.get_4_bytes_at_offset(address + 1, 0);
 	}
@@ -751,8 +775,56 @@ class Stack {
 	get_Array_element_size(address): number {
 		return this.get_4_bytes_at_offset(address + 1, 4);
 	}
+
+	/**
+	 * Returns the size of the whole array in words
+	 * 
+	 * @param address 
+	 * @returns 
+	 */
+	get_Array_size(address): number {
+		return STACK.get_Array_len(address) * STACK.get_Array_element_size(address) + 2
+	}
+
+	/**
+	 * Returns the element of this array at the given index.
+	 * 
+	 * @param address 
+	 * @param idx 
+	 * @returns 
+	 */
+	get_Array_element(address: number, idx: number): number {
+		const length = this.get_Array_len(address);
+		const element_size = this.get_Array_element_size(address)
+
+		if (idx >= length) {
+			throw new Error("Runtime error; Accessing index out of bound of array")
+		}
+
+		return (address + this.get_size(address)) + idx * element_size;
+	}
+
+	/**
+	 * Returns an array of addresses of this array's elements.
+	 * 
+	 * @param address 
+	 * @returns 
+	 */
+	get_Array_elements(address: number): number[] {
+		const length = this.get_Array_len(address);
+		let result: number[] = []
+		for (let i = 0; i < length; i++) {
+			result.push(this.get_Array_element(address, i))
+		}
+
+		return result;
+	}
 }
 	
+/* *************************
+ * Heap
+ * *************************/
+
 class Heap {
 	// Only String, Env and Env Frame nodes are allocated on Heap
 	private heap: DataView;
@@ -765,13 +837,13 @@ class Heap {
 	private environementStack = []
 
 	constructor(heap_size_bytes: number) {
-		if (heap_size_bytes % (word_size * node_size) !== 0) throw new Error("Runtime Error; [HEAP::constructor] heap bytes must be divisible by word size * node size");
+		if (heap_size_bytes % (WORD_SIZE * NODE_SIZE) !== 0) throw new Error("Runtime Error; [HEAP::constructor] heap bytes must be divisible by word size * node size");
 		this.heap = new DataView(new ArrayBuffer(heap_size_bytes));
 
 		// set up linked list of free nodes
 		let i
-		for (i = 0; i < heap_size_bytes / word_size - node_size; i = i + node_size) {
-			this.set(i, i + node_size)
+		for (i = 0; i < heap_size_bytes / WORD_SIZE - NODE_SIZE; i = i + NODE_SIZE) {
+			this.set(i, i + NODE_SIZE)
 		}
 		this.set(i, -1)
 	}
@@ -789,7 +861,7 @@ class Heap {
 		// console.log(`[freeMem] Freed Memory of ${address} Tag: ${tagMap[(HEAP.getTag(address))]}`)
 		
 		// Leave string heap nodes to free at the end of programme execution
-		if (HEAP.getTag(address) === String_tag) {
+		if (STRING_POOL_ACTIVATED && HEAP.getTag(address) === String_tag) {
 			return;
 		}
 
@@ -800,6 +872,9 @@ class Heap {
 	}
 
 	freeStringMem(address: number) {
+
+		if (!STRING_POOL_ACTIVATED) return;
+		
 		// sanity check
 		if (is_stack_address(address)) {
 			throw new Error("Runtime Error; [HEAP::freeStringMem] Address is not a heap node!")
@@ -824,7 +899,7 @@ class Heap {
 	}
 
 	allocate(tag: number, size: number): number {
-		if (size > node_size) {
+		if (size > NODE_SIZE) {
             throw new Error("Runtime Error; [HEAP::allocate] Limitation: nodes cannot be larger than 10 words")
         }
 
@@ -834,17 +909,17 @@ class Heap {
 		this.n_nodes_used++
 		const address = this.free;
 		this.free = HEAP.get(this.free);
-		this.heap.setUint8(address * word_size, tag);
-		this.heap.setUint16(address * word_size + size_offset, size);
+		this.heap.setUint8(address * WORD_SIZE, tag);
+		this.heap.setUint16(address * WORD_SIZE + SIZE_OFFSET, size);
 		return address;
 	}
 
 	get(address: number): number {
-		return this.heap.getFloat64(address * word_size);
+		return this.heap.getFloat64(address * WORD_SIZE);
 	}
 
 	set(address: number, value: number): void {
-		this.heap.setFloat64(address * word_size, value);
+		this.heap.setFloat64(address * WORD_SIZE, value);
 	}
 
 	getChild(address: number, index: number): number {
@@ -856,11 +931,11 @@ class Heap {
 	}
 
 	getTag(address: number): number {
-		return this.heap.getUint8(address * word_size);
+		return this.heap.getUint8(address * WORD_SIZE);
 	}
 
 	getSize(address: number): number {
-		return this.heap.getUint16(address * word_size + size_offset);
+		return this.heap.getUint16(address * WORD_SIZE + SIZE_OFFSET);
 	}
 	
 	getNumberOfChildren(address: number): number {
@@ -873,22 +948,22 @@ class Heap {
 	
 	// byte/2byte/4byte utilities
 	setByte(address: number, offset: number, value: number): void {
-		this.heap.setUint8(address * word_size + offset, value);
+		this.heap.setUint8(address * WORD_SIZE + offset, value);
 	}
 	getByte(address: number, offset: number): number {
-		return this.heap.getUint8(address * word_size + offset);
+		return this.heap.getUint8(address * WORD_SIZE + offset);
 	}
 	set2Bytes(address: number, offset: number, value: number): void {
-		this.heap.setUint16(address * word_size + offset, value);
+		this.heap.setUint16(address * WORD_SIZE + offset, value);
 	}
 	get2Bytes(address: number, offset: number): number {
-		return this.heap.getUint16(address * word_size + offset);
+		return this.heap.getUint16(address * WORD_SIZE + offset);
 	}
 	set4Bytes(address: number, offset: number, value: number): void {
-		this.heap.setUint32(address * word_size + offset, value);
+		this.heap.setUint32(address * WORD_SIZE + offset, value);
 	}
 	get4Bytes(address: number, offset: number): number {
-		return this.heap.getUint32(address * word_size + offset);
+		return this.heap.getUint32(address * WORD_SIZE + offset);
 	}
 
 	// String interning
@@ -1028,305 +1103,6 @@ class Heap {
 	}
 
 }
-
-
-/* *************************
- * HEAP
- * *************************/
-
-// HEAP is an array of bytes (JS ArrayBuffer)
-
-// heap_make allocates a heap of given size
-// (in megabytes)and returns a DataView of that,
-// see https://www.javascripture.com/DataView
-// const heap_make = (bytes) => {
-// 	if (bytes % 8 !== 0) error("heap bytes must be divisible by 8");
-// 	const data = new ArrayBuffer(bytes);
-// 	const view = new DataView(data);
-// 	return view;
-// };
-
-// // we randomly pick a heap size of 1000000 bytes
-// // const HEAP = heap_make(1000000);
-
-// // free is the next free index in HEAP
-// // we keep allocating as if there was no tomorrow
-// // let free = 0;
-
-// // heap_allocate allocates a given number of words
-// // on the heap and marks the first word with a 1-byte tag.
-// // the last two bytes of the first word indicate the number
-// // of children (addresses) that follow the tag word:
-// // [1 byte tag, 4 bytes payload (depending on node type),
-// //  2 bytes #children, 1 byte unused]
-// // Note: payload depends on the type of node
-// const heap_allocate = (tag, size) => {
-// 	const address = free;
-	
-// 	// allocate (size) number of words
-// 	free += size;
-
-// 	// set the first byte to tag
-// 	HEAP.setUint8(address * word_size, tag);
-
-// 	// number of children = size - 1
-// 	HEAP.setUint16(address * word_size + size_offset, size); 
-
-// 	return address;
-// };
-
-// // get and set a word in heap at given address
-// const heap_get = (address) => HEAP.getFloat64(address * word_size);
-
-// const heap_set = (address, x) => HEAP.setFloat64(address * word_size, x);
-
-// // child index starts at 0
-// const heap_get_child = (address, child_index) =>
-// 	heap_get(address + 1 + child_index);
-
-// const heap_set_child = (address, child_index, value) =>
-// 	heap_set(address + 1 + child_index, value);
-
-// const heap_get_tag = (address) => HEAP.getUint8(address * word_size);
-
-// const heap_get_size = (address) =>
-// 	HEAP.getUint16(address * word_size + size_offset);
-
-// // the number of children is one less than the size
-// const heap_get_number_of_children = (address) => heap_get_size(address) - 1;
-
-// // access byte in heap, using address and offset
-// const heap_set_byte_at_offset = (address, offset, value) =>
-// 	HEAP.setUint8(address * word_size + offset, value);
-
-// const heap_get_byte_at_offset = (address, offset) =>
-// 	HEAP.getUint8(address * word_size + offset);
-
-// // access 2 bytes in heap, using address and offset
-// const heap_set_2_bytes_at_offset = (address, offset, value) =>
-// 	HEAP.setUint16(address * word_size + offset, value);
-
-// const heap_get_2_bytes_at_offset = (address, offset) =>
-// 	HEAP.getUint16(address * word_size + offset);
-
-// // access 4 bytes in heap, using address and offset
-// const heap_set_4_bytes_at_offset = (address, offset, value) =>
-// 	HEAP.setUint32(address * word_size + offset, value);
-
-// const heap_get_4_bytes_at_offset = (address, offset) =>
-// 	HEAP.getUint32(address * word_size + offset);
-
-// // for debugging: return a string that shows the bits
-// // of a given word
-// const word_to_string = (word) => {
-// 	const buf = new ArrayBuffer(8);
-// 	const view = new DataView(buf);
-// 	view.setFloat64(0, word);
-// 	let binStr = "";
-// 	for (let i = 0; i < 8; i++) {
-// 		binStr += ("00000000" + view.getUint8(i).toString(2)).slice(-8) + " ";
-// 	}
-// 	return binStr;
-// };
-
-// Record<string, tuple(number, string)< where the key is the hash of the string
-// and the value is a tuple of the address of the string and the string itself
-// let stringPool = {}; // ADDED CHANGE
-
-
-
-// ADDED CHANGE
-// strings:
-// [1 byte tag, 4 byte hash to stringPool,
-// 2 bytes #children, 1 byte unused]
-// Note: #children is 0
-
-// Hash any string to a 32-bit unsigned integer
-// const hashString = (str) => {
-// 	let hash = 5381;
-// 	for (let i = 0; i < str.length; i++) {
-// 		const char = str.charCodeAt(i);
-// 		hash = (hash << 5) + hash + char;
-// 		hash = hash & hash;
-// 	}
-// 	return hash >>> 0;
-// };
-
-// const is_String = (address) => heap_get_tag(address) === String_tag;
-
-// const heap_allocate_String = (string) => {
-// 	const hash = hashString(string);
-// 	const a = stringPool[hash];
-
-// 	if (a !== undefined) {
-// 	    for (let i = 0; i < a.length; i++) {
-//             if (a[i].string === string)
-//                 return a[i].address;
-//             const address = heap_allocate(String_tag, 2);
-//             heap_set_4_bytes_at_offset(address, 1, hash);
-//             heap_set_2_bytes_at_offset(address, 5, i);
-//             a[i] = {address, string};
-//             return address;
-//         }
-// 	}
-
-// 	const address = heap_allocate(String_tag, 2);
-// 	heap_set_4_bytes_at_offset(// [1 byte tag, 1 byte id, 3 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// Note: #children is 0in the string pool under hash at index 0
-// 	stringPool[hash] = [{address, string}];
-
-// 	return address;
-// };
-
-// const heap_get_string_hash = (address) =>
-// 	heap_get_4_bytes_at_offset(address, 1);
-
-// const heap_get_string_index = (address) =>
-// 	heap_get_2_bytes_at_offset(address, 5);
-	
-// const heap_get_string = (address) =>
-// 	stringPool[heap_get_string_hash(address)]
-// 	          [heap_get_string_index(address)]
-// 	          .string;
-
-// builtins: builtin id is encoded in second byte
-// [1 byte tag, 1 byte id, 3 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// Note: #children is 0
-
-// const is_Builtin = (address) => heap_get_tag(address) === Builtin_tag;
-
-// const heap_allocate_Builtin = (id) => {
-// 	const address = heap_allocate(Builtin_tag, 1);
-// 	heap_set_byte_at_offset(address, 1, id);
-// 	return address;
-// };
-
-// const heap_get_Builtin_id = (address) => heap_get_byte_at_offset(address, 1);
-
-// closure
-// [1 byte tag, 1 byte arity, 2 bytes pc, 1 byte unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the address of env => closure has environment capture, but Rust fn does not.
-
-// note: currently bytes at offset 4 and 7 are not used;
-//   they could be used to increase pc and #children range
-
-// const heap_allocate_Closure = (arity, pc, env) => {
-// 	const address = heap_allocate(Closure_tag, 2);
-// 	heap_set_byte_at_offset(address, 1, arity);
-// 	heap_set_2_bytes_at_offset(address, 2, pc);
-// 	heap_set(address + 1, env);
-// 	return address;
-// };
-
-// const heap_get_Closure_arity = (address) => heap_get_byte_at_offset(address, 1);
-
-// const heap_get_Closure_pc = (address) => heap_get_2_bytes_at_offset(address, 2);
-
-// const heap_get_Closure_environment = (address) => heap_get_child(address, 0);
-
-// const is_Closure = (address) => heap_get_tag(address) === Closure_tag;
-
-// environment frame
-// [1 byte tag, 4 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the addresses of its values
-
-// const heap_allocate_Frame = (number_of_values) =>
-// 	heap_allocate(Frame_tag, number_of_values + 1);
-
-// const heap_Frame_display = (address) => {
-// 	display("", "Frame:");
-// 	const size = heap_get_number_of_children(address);
-// 	display(size, "frame size:");
-// 	for (let i = 0; i < size; i++) {
-// 		display(i, "value address:");
-// 		const value = heap_get_child(address, i);
-// 		display(value, "value:");
-// 		display(word_to_string(value), "value word:");
-// 	}
-// };
-
-// environment
-// [1 byte tag, 4 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the addresses of its frames
-
-// const heap_allocate_Environment = (number_of_frames) =>
-// 	heap_allocate(Environment_tag, number_of_frames + 1);
-
-
-
-// access environment given by address
-// using a "position", i.e. a pair of
-// frame index and value index
-// const heap_get_Environment_value = (env_address, position) => {
-// 	const [frame_index, value_index] = position;
-// 	const frame_address = heap_get_child(env_address, frame_index);
-// 	return heap_get_child(frame_address, value_index);
-// };
-
-// const heap_set_Environment_value = (env_address, position, value) => {
-// 	const [frame_index, value_index] = position;
-// 	const frame_address = heap_get_child(env_address, frame_index);
-// 	heap_set_child(frame_address, value_index, value);
-// };
-
-// extend a given environment by a new frame:
-// create a new environment that is bigger by 1
-// frame slot than the given environment.
-// copy the frame Addresses of the given
-// environment to the new environment.
-// enter the address of the new frame to end
-// of the new environment
-// const heap_Environment_extend = (frame_address, env_address) => {
-// 	const old_size = heap_get_size(env_address);
-// 	const new_env_address = heap_allocate_Environment(old_size);
-// 	let i;
-// 	for (i = 0; i < old_size - 1; i++) {
-// 		heap_set_child(new_env_address, i, heap_get_child(env_address, i));
-// 	}
-// 	heap_set_child(new_env_address, i, frame_address);
-// 	return new_env_address;
-// };
-
-// // for debuggging: display environment
-// // const heap_Environment_display = (env_address) => {
-// // 	const size = heap_get_number_of_children(env_address);
-// // 	display("", "Environment:");
-// // 	display(size, "environment size:");
-// // 	for (let i = 0; i < size; i++) {
-// // 		display(i, "frame index:");
-// // 		const frame = heap_get_child(env_address, i);
-// // 		heap_Frame_display(frame);
-// // 	}
-// // };
-
-// number (I32 / F64)
-// [1 byte tag, 4 bytes unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the number, one word
-// note: #children is 0
-
-// reference
-// [1 byte tag, 4 bytes, unused,
-//  2 bytes #children, 1 byte unused]
-// followed by the address of the underlying value
-// then the address of referenced variable
-// const heap_allocate_Reference = (address) => {
-// 	// const reference_address = heap_allocate(Number_tag, 2);
-// 	// heap_set(reference_address + 1, heap_get(address)) // underlying value
-// 	// heap_set(reference_address + 2, address); // referenced variable
-// 	// return reference_address;
-// }
-
-// const heap_get_underlying_value = (address) => heap_get(address + 1);
-// const heap_get_referenced_variable = (address) => heap_get(address + 2);
-
-
-// const is_Reference = (address) => heap_get_tag(address) === Reference_tag;
 
 //
 // conversions between addresses and Rust Value
@@ -1644,15 +1420,15 @@ const microcode = {
 		if (STACK.is_heap_allocated_type(LHS_address)) {
 			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
 			HEAP.freeMem(heap_addr);			
-		}
+		} // TODO: free the nodes recursively too
 		
-		const words_to_copy: number = STACK.get_size(RHS_address);
-		
+		const words_to_copy: number = STACK.get_tag(RHS_address) === Array_tag 
+			? STACK.get_Array_size(RHS_address)
+		 	: STACK.get_size(RHS_address);
+
 		STACK.shallow_copy(LHS_address, RHS_address, words_to_copy);
-		if (STACK.is_heap_allocated_type(RHS_address)) {
-			// Implementing MOVE trait
-			STACK.mark_moved(RHS_address);			
-		}
+
+		STACK.move_recursively(RHS_address)
 
 		STACK.cleanup_Temps()
 
@@ -1676,15 +1452,15 @@ const microcode = {
 		if (STACK.is_heap_allocated_type(LHS_address)) {
 			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
 			HEAP.freeMem(heap_addr);			
-		}
+		} // TODO: free the nodes recursively too
 		
-		const words: number = STACK.get_size(RHS_address);
-		STACK.shallow_copy(LHS_address, RHS_address, words);
-		
-		if (STACK.is_heap_allocated_type(RHS_address)) {
-			// Implementing MOVE trait
-			STACK.mark_moved(RHS_address);			
-		}
+		const words_to_copy: number = STACK.get_tag(RHS_address) === Array_tag 
+			? STACK.get_Array_size(RHS_address)
+		 	: STACK.get_size(RHS_address);
+
+		STACK.shallow_copy(LHS_address, RHS_address, words_to_copy);
+
+		STACK.move_recursively(RHS_address);
 
 		STACK.cleanup_Temps()
 
@@ -1799,20 +1575,18 @@ const microcode = {
 	ARRAY_FILL: (instr) => {
 		// OS currently has [array_placeholder_addr, value_addr]
 		const value_addr: number = OS.pop()
-		const array_placeholder_addr: number = OS.pop()
+		const array_placeholder_addr: number = peek(OS, 0)
 
-		// copy or move the values over to the placeholder block of memory
-		STACK.set_SP_to_addr(array_placeholder_addr)
-		STACK.allocate_Array(instr.length, instr.elementSize)
+		if (STACK.is_heap_allocated_type(value_addr)) { // sanity check
+			throw new Error("Runtime error; Cannot use a non-copy type in array fill syntax")
+		}
+
+		// copy the values over to the placeholder block of memory
+		let addr_pointer: number = array_placeholder_addr + STACK.get_size(array_placeholder_addr) // 2 === size of array tag
 		for (let i = 0; i < instr.length; i++) {
-			STACK.create_copy(value_addr)
+			STACK.shallow_copy(addr_pointer, value_addr, instr.elementSize)
+			addr_pointer += instr.elementSize
 		}
-		if (STACK.is_heap_allocated_type(value_addr)) {
-			// Implementing MOVE trait
-			STACK.mark_moved(value_addr);
-		}
-
-		push(OS, array_placeholder_addr)
 	},
 
 	ARRAY: (instr) => {
@@ -1827,25 +1601,24 @@ const microcode = {
 		const array_placeholder_addr: number = peek(OS, 0)
 		
 		// copy or move the values over to the placeholder block of memory
-		let addr_pointer: number = array_placeholder_addr + 2 // 2 === size of array tag
+		let addr_pointer: number = array_placeholder_addr + STACK.get_size(array_placeholder_addr) // 2 === size of array tag
 		for (const element_addr of element_addrs) {
-			const element_size = STACK.get_size(element_addr);
-			STACK.shallow_copy(addr_pointer, element_addr, element_size)
+			STACK.shallow_copy(addr_pointer, element_addr, instr.elementSize)
 
-			// prevent double free + use after free during cleanups
-			if (STACK.is_heap_allocated_type(element_addr)) {
-				STACK.mark_moved(element_addr);
-			}
+			// move elements of nested arrays
+			STACK.move_recursively(element_addr)
 
-			addr_pointer += element_size
+			addr_pointer += instr.elementSize
 		}
 	},
 
 	ARRAY_INDEX: (instr) => {
-		const index: number = OS.pop()
+		const index: number = address_to_Rust_value(OS.pop()).val
 		const array_addr: number = OS.pop()
-		const element_addr = array_addr + 2 + address_to_Rust_value(index).val * STACK.get_Array_element_size(array_addr)
-		// console.log(`Array address: ${array_addr}, element address: ${element_addr}`)
+
+		// will throw index out-of-bound error if violated
+		const element_addr = STACK.get_Array_element(array_addr, index) 
+
 		push(OS, element_addr)
 	}
 };

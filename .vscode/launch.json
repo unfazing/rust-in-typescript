@@ -8,7 +8,7 @@
             "type": "node",
             "request": "launch",
             "name": "Debug Rollup Output",
-            "program": "${workspaceFolder}/dist/TestTypeChecker.js",
+            "program": "${workspaceFolder}/dist/TestVM.js",
             "sourceMaps": true,
             "outFiles": [
                 "${workspaceFolder}/dist/**/*.js"

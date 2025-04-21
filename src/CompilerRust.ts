@@ -579,7 +579,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         if (ctx.arrayElements()) {
             this.visit(ctx.arrayElements())
         } else {
-            instrs[wc++] = { tag: "ARRAY", length: 0 }
+            instrs[wc++] = { tag: "ARRAY", length: 0 , elementSize: 0}
         }
 
     }
