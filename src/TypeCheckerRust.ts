@@ -447,9 +447,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         return !(type instanceof ClosureType) && !(type instanceof ScalarType) && !(type instanceof ImmutableRefType)
     }
 
+
     // Used when getting a symbol from a borrow expression or path expression or index expression
     getSymbolFromExpression(expr_ctx: ExpressionContext): string {
-        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext) {
+        if (expr_ctx instanceof GroupedExpressionContext || expr_ctx instanceof BorrowExpressionContext || expr_ctx instanceof DereferenceExpressionContext) {
             return this.getSymbolFromExpression(expr_ctx.expression())
         }
 
