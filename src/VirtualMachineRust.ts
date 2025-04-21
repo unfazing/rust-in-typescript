@@ -259,7 +259,7 @@ class Stack {
 
 	cleanup_Temps() {
 		const marker: number = this.temps_marker_stack.pop();	
-		this.free_heap_allocated_memory(marker);
+		this.free_heap_allocated_memory_in_range(marker, this.SP);
 		this.SP = marker; // pop stack temps
 	}
 
@@ -593,7 +593,7 @@ class Stack {
 			throw new Error("Runtime Error; [STACK::pop_Callframe] FP is not pointed to a call frame.")
 		}
 
-		this.free_heap_allocated_memory(this.FP);
+		this.free_heap_allocated_memory_in_range(this.FP, this.SP);
 
 		this.SP = this.FP;
 		this.FP = this.get_Callframe_FP();
@@ -643,25 +643,25 @@ class Stack {
 			throw new Error("Runtime Error; [STACK::pop_Blockframe] FP is not pointed to a block frame.")
 		}
 
-		this.free_heap_allocated_memory(this.FP);
+		this.free_heap_allocated_memory_in_range(this.FP, this.SP);
 
 		this.SP = this.FP;
 		this.FP = this.get_Blockframe_FP();
 	}
 
 	/**
-	 * Iterate through each node on the current stack frame
+	 * Iterate through each node in the given range
 	 * to free heap-allocated nodes pointed to by
 	 * valid (unmoved) stack pointers
 	 */
-	free_heap_allocated_memory(starting_addr: number) {
+	free_heap_allocated_memory_in_range(starting_addr: number, ending_addr: number) {
 		
 		// the address at the top of the OS is the object we are moving out of scope!
 		const address_on_OS = peek(OS, 0); // case where RHS is a call or block expr
 		const is_result_heap_allocated = this.is_heap_allocated_type(address_on_OS)
 		
 		let addr = starting_addr;
-		while (addr < this.SP) {
+		while (addr < ending_addr) {
 			// console.log(`[STACK::pop_Blockframe] Visiting stack addr ${addr}, tag: ${this.tag_to_string(STACK.get_tag(addr))}`)
 
 			// skip this address if its being moved outside of scope
