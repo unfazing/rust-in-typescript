@@ -15,17 +15,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tsammeow/conductor-runner-example.git"
+    "url": "git+https://github.com/unfazing/rust-in-typescript.git"
   },
-  "author": "tsammeow",
+  "author": "",
   "license": "ISC",
   "files": [
     "dist"
   ],
   "bugs": {
-    "url": "https://github.com/tsammeow/conductor-runner-example/issues"
+    "url": "https://github.com/unfazing/rust-in-typescript/issues"
   },
-  "homepage": "https://github.com/tsammeow/conductor-runner-example#readme",
+  "homepage": "https://github.com/unfazing/rust-in-typescript#readme",
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.0",
     "@rollup/plugin-terser": "^0.4.4",

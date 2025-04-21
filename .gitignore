@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 
+.antlr
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
