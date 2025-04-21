@@ -195,6 +195,13 @@ test_VM(`
     }
     `, 1, "VM - Create arrays of reference types")
 
+test_VM(`
+    fn main() -> string {
+        let mut arr: [string; 2] = ["hello", "world"];
+        arr = ["goodbye", "rip"];
+        return arr[0];
+    }
+    `, "goodbye", "VM - Assigning to a move-typed array")
 
 test_VM(`
     fn main() {

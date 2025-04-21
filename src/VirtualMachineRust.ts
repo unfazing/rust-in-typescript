@@ -712,15 +712,50 @@ class Stack {
 		return HEAP.getString(heap_addr);
 	}
 
+	/**
+	 * Mark this node as moved if it is heap-allocated
+	 * If this node is an array, recursively mark its elements too
+	 * 
+	 * @param address 
+	 */
 	move_recursively(address: number) {
-		if (STACK.get_tag(address) !== Array_tag) {
-			if (STACK.is_heap_allocated_type(address)) {
-				STACK.mark_moved(address);
+		if (this.get_tag(address) !== Array_tag) {
+			if (this.is_heap_allocated_type(address)) {
+				this.mark_moved(address);
 			}
 		} else {
-			const elements: number[] = STACK.get_Array_elements(address)
+			const elements: number[] = this.get_Array_elements(address)
 			for (const element_addr of elements) {
 				this.move_recursively(element_addr)
+			}
+		}
+	}
+
+	/**
+	 * Frees this node from heap memory if it is heap-allocated.
+	 * If this node is an array, recursively free its elements too
+	 * 
+	 * @param address 
+	 * @returns 
+	 */
+	free_recursively(address: number): boolean {
+		if (this.get_tag(address) !== Array_tag) {
+			let free_success = false;
+			if (this.is_heap_allocated_type(address)) {
+				HEAP.freeMem(this.get_heap_allocated_address(address));
+				free_success = true;
+			}
+			return free_success;
+		} else {
+			const elements: number[] = this.get_Array_elements(address)
+			for (const element_addr of elements) {
+				const free_success = this.free_recursively(element_addr)
+
+				// terminate early if this array does 
+				// NOT store heap-allocated elements
+				if (!free_success) {
+					return free_success
+				}
 			}
 		}
 	}
@@ -1143,7 +1178,7 @@ const address_to_Rust_value = (address: number): RustValue => {
 	}
 
 	if (STACK.is_Reference(address)) {
-		value = new RustValue("reference"); // TODO: create a proper wrapper for reference? For debugging purposes mostly
+		value = new RustValue("reference"); 
 	}
 
 	if (STACK.is_String(address)) {
@@ -1417,10 +1452,7 @@ const microcode = {
 		// we can safely deallocate old heap object pointed to by LHS
 		// because the typechecker enforces that this object has no 
 		// dangling references by the time an assignnment happens
-		if (STACK.is_heap_allocated_type(LHS_address)) {
-			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
-			HEAP.freeMem(heap_addr);			
-		} // TODO: free the nodes recursively too
+		STACK.free_recursively(LHS_address);
 		
 		const words_to_copy: number = STACK.get_tag(RHS_address) === Array_tag 
 			? STACK.get_Array_size(RHS_address)
@@ -1449,10 +1481,7 @@ const microcode = {
 		// we can safely deallocate old heap object pointed to by LHS
 		// because the typechecker enforces that this object has no 
 		// dangling references by the time an assignmnent happens
-		if (STACK.is_heap_allocated_type(LHS_address)) {
-			const heap_addr = STACK.get_heap_allocated_address(LHS_address);
-			HEAP.freeMem(heap_addr);			
-		} // TODO: free the nodes recursively too
+		STACK.free_recursively(LHS_address);
 		
 		const words_to_copy: number = STACK.get_tag(RHS_address) === Array_tag 
 			? STACK.get_Array_size(RHS_address)
