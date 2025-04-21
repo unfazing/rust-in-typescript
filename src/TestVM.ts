@@ -575,6 +575,52 @@ test_VM(`
         s
     }`, "new", "VM - References - string Reassignment");
 
+test_VM(`
+    fn main() -> i32 {
+        fn copy(mut y: i32)->i32 {
+            y = y + 1;
+            y
+        }
+        let x: i32 = 0;
+        copy(x);
+        x
+    }`, 0, "VM - Function calls - Copy arguments");
+
+test_VM(`
+    fn main() -> string {
+        fn mover(mut y: string) -> string {
+            return y + " world";
+        }
+        let x: string = "hello";
+        mover(x) 
+    }`, "hello world", "VM - Function calls - Move arguments");
+
+test_VM(`
+    fn main() -> i32 {
+        fn mutate(y: &mut i32) {
+            *y = *y + 1
+        }
+        let mut x: i32 = 0;
+        mutate(&mut x);
+        x
+    }`, 1, "VM - Mutate external variables using function");
+
+
+
+test_VM(`
+    fn main() -> i32 {
+        fn another_tail() -> i32 {
+            return 1;
+        }
+
+        fn tail() -> i32 {
+            return another_tail();
+        }
+
+        return tail();
+
+    }`, 1, "VM - Tail calls - clean up environments for tail call frames");
+
 // // Invalid array case — left as is
 // test_VM(`
 //     fn main() -> string {

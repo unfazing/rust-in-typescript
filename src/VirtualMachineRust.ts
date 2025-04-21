@@ -241,7 +241,7 @@ class Stack {
 	 * @param target_address 
 	 * @returns 
 	 */
-	create_copy(target_address: number): number {
+	allocate_copy_at_current_SP(target_address: number): number {
 		const target_size: number = this.get_size(target_address);
 		const target_tag: number = this.get_tag(target_address);
 
@@ -870,6 +870,7 @@ class Heap {
 
 	// a stack of env allocated to be freed on scope exit
 	private environementStack = []
+	public numTailCalls = 0
 
 	constructor(heap_size_bytes: number) {
 		if (heap_size_bytes % (WORD_SIZE * NODE_SIZE) !== 0) throw new Error("Runtime Error; [HEAP::constructor] heap bytes must be divisible by word size * node size");
@@ -1130,7 +1131,9 @@ class Heap {
 	}
 
 	freeGlobalEnvironment() {
-		assert(this.environementStack.length == 2, "At the end of the program, there should remain 2 environments left (global and empty environment)")
+		if (this.environementStack.length > 2) {
+			throw new Error("Runtime error; At the end of the program, only 2 environments should remain (global and empty environment)")
+		}
 
 		while (this.environementStack.length > 0) {
 			this.freeEnvironmentAndLatestFrame();
@@ -1514,16 +1517,23 @@ const microcode = {
 		if (STACK.compare_tag(fun, Builtin_tag)) {
 			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
-
 		// else, must a be a user defined function. Stored on the stack
-		const frame_address = HEAP.allocateFrame(arity);
-		for (let i = arity - 1; i >= 0; i--) {
-			HEAP.setChild(frame_address, i, OS.pop());
-		}
-		OS.pop(); // pop fun
 
 		STACK.allocate_Callframe(E, PC);
-
+		
+		const frame_address = HEAP.allocateFrame(arity);
+		for (let i = arity - 1; i >= 0; i--) {
+			const argument_addr: number = OS.pop();
+			
+			const parameter_addr = STACK.allocate_copy_at_current_SP(argument_addr);
+			STACK.move_recursively(argument_addr); // move argument into function if it implement MOVE trait
+			
+			HEAP.setChild(frame_address, i, parameter_addr);
+		}
+		
+		
+		OS.pop(); // pop fun
+		
 		E = HEAP.extendEnvironment(
 			frame_address,
 			STACK.get_Closure_Env(fun), 
@@ -1537,14 +1547,23 @@ const microcode = {
 		if (STACK.compare_tag(fun, Builtin_tag)) {
 			return apply_builtin(STACK.get_Builtin_Id(fun));
 		}
-
+		
 		const frame_address = HEAP.allocateFrame(arity);
 		for (let i = arity - 1; i >= 0; i--) {
-			HEAP.setChild(frame_address, i, OS.pop());
+			const argument_addr: number = OS.pop();
+			
+			const parameter_addr = STACK.allocate_copy_at_current_SP(argument_addr);
+			STACK.move_recursively(argument_addr); // move argument into function if it implement MOVE trait
+
+			HEAP.setChild(frame_address, i, parameter_addr);
 		}
+
 		OS.pop(); // pop fun
 
 		// don't push on RTS here
+
+		// increment number of tail calls to free the extended env later
+		HEAP.numTailCalls += 1
 
 		E = HEAP.extendEnvironment(
 			frame_address,
@@ -1571,6 +1590,7 @@ const microcode = {
 	},
 	RESET: (instr) => {
 
+		// Pop the block frames until we see the first call frame
 		while (STACK.is_Blockframe()) {
 			HEAP.freeEnvironmentAndLatestFrame();
 
@@ -1579,9 +1599,13 @@ const microcode = {
 			STACK.pop_Blockframe();
 		}
 
-		// Current stack frame must be the first call frame
-
-		// Deallocate current environment and its latest frame
+		// Deallocate environments extended during tail calls
+		while (HEAP.numTailCalls > 0) {
+			HEAP.freeEnvironmentAndLatestFrame();
+			HEAP.numTailCalls -= 1
+		}
+		
+		// Deallocate the environment extended by the first call frame 
 		HEAP.freeEnvironmentAndLatestFrame();
 
 		// restore PC, E and FP
