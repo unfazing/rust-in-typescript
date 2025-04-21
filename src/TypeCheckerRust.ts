@@ -545,10 +545,15 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
 
     // (AND | ANDAND) KW_MUT? expression
     visitBorrowExpression(ctx: BorrowExpressionContext): Type {
+
         const is_mut_borrow: boolean = (ctx.KW_MUT() != null)
         const inner_type: Type = this.visit(ctx.expression());
 
         this.log(`${is_mut_borrow ? "MUTABLE" : "IMMUTABLE"} BORROW HAS INNER_TYPE: ${unparse_type(inner_type)}`, "BORROW_EXPRESSION");
+
+        if (inner_type.IsTemporary) {
+            this.print_or_throw_error(`Type error in borrow expression; cannot borrow a temporary value`, ctx);            
+        }
         
         if (inner_type instanceof ClosureType) {
             this.print_or_throw_error(`Type error in borrow expression; cannot borrow a closure: ${unparse_type(inner_type)}`, ctx);            
