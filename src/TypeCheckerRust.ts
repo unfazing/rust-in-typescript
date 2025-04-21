@@ -594,7 +594,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return is_mut_borrow ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
         }
 
-        // TODO: Check if it is okay to ignore nestedness in updating variable's borrow status
+        // Ignore nestedness in updating variable's borrow status
         // e.g. on the type environment, let y = &x; vs let y = &&x; both simply adds an immutable borrow x. 
         if (ctx.ANDAND()) {
             let inner_ref_type: RefType = is_mut_borrow ? new MutableRefType(inner_type) : new ImmutableRefType(inner_type)
@@ -707,11 +707,9 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         const expected_type: Type = this.visit(LHS); 
         const actual_type: Type = this.visit(RHS);
 
-        // TODO: change the default to mutable: true
         if (!expected_type.IsMutable) {
             this.print_or_throw_error('Type error in assignment; tried to assign when variable is immutable.', ctx)
         }
-
 
         // if assigning to a deref, check if the ref is a mut&
         // e.g. *x = y;
@@ -1344,16 +1342,6 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             return borrow_param
         }
 
-        // CHANGED: scan out function declarations in block and crate instead of adding to type env in line
-        // // read type declarations for the function
-        // const symbol: string = this.visit(ctx.identifier());
-        // const expected_param_types: Type[] = ctx.functionParameters() ? this.visit(ctx.functionParameters()) : [];
-        // const expected_return_type: Type = ctx.functionReturnType() ? this.visit(ctx.functionReturnType()) : new UnitType();
-        // const fun_type: ClosureType = new ClosureType(expected_param_types, expected_return_type);
-        
-        // // add symbol binding to type environment
-        // te.add_symbol_to_current_frame(symbol, fun_type);
-
         // extend the environment to store type mapping for parameters
         const symbol: string = this.visit(ctx.identifier());
         this.te.extend_type_environment(IS_FUNCTIONTYPEFRAME, `PARAMETERS OF FUNCTION '${symbol}'`)
@@ -1562,7 +1550,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // constantItem
     // : KW_CONST (identifier | UNDERSCORE) COLON type_ (EQ expression)? SEMI
     // ;
-    // In rust, constants can be assigned to borrows if they are static borrows.
+    // QUIRK: In rust, constants can be assigned to borrows if they are static borrows.
     // Our implementation does not support static variables, hence constants are not allowed to be borrows.
     visitConstantItem(ctx: ConstantItemContext): Type {
         const symbol: string = this.visit(ctx.identifier());
@@ -1608,9 +1596,6 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     }
 
     // Return the string representation of the identifier
-    // the identifier is overloaded! It can either be:
-    // 1. the symbol of a variable (e.g. x)
-    // 2. the type of the variable (e.g. i32)
     visitIdentifier(ctx: IdentifierContext): string {
         return ctx.getText();
     }
