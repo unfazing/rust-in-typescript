@@ -628,7 +628,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         }
 
         if (ctx instanceof PathExpression_Context) {
-            const symbol: string = this.getSymbolFromExpression(this.visit(ctx))
+            const symbol: string = this.getSymbolFromExpression(ctx)
             return ce.get_compile_time_type(symbol).getSize()
         }
 
