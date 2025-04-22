@@ -63,6 +63,7 @@ import { test_VM } from './TestingUtils.js';
 //     `, 3.0, "Valid - Moving a dereferenced element in a copy array")
 
 
+// Arrays
 
 test_VM(`
     fn main() -> i32{
@@ -70,7 +71,6 @@ test_VM(`
         arr[0]
     }
     `, 1, "")
-
 
 test_VM(`
     fn main() -> i32{
@@ -210,6 +210,19 @@ test_VM(`
         let mut arr2: [i32; 0] = [];
     }
     `, undefined, "VM - Create empty array")
+
+test_VM(`
+    fn main() -> i32 {
+        let a: i32 = 1;
+        let b: i32 = 2;
+        let c: i32 = 3;
+        
+        let mut array: [i32; 3] = [a, b, c];
+        array[0] = 3;
+        
+        return array[0];
+    }
+`, 3, "VM - Assigning to an index of array containing variables");
 
 // No main found
 test_VM(`fn not_main() {}`, undefined, "VM - No Main Function");
@@ -801,11 +814,13 @@ test_VM(`
     }
 `, "continue outside of a loop", "Compiler - continue outside a loop");
 
-// // Invalid array case — left as is
+// Invalid array case — left as is
 // test_VM(`
 //     fn main() -> string {
 //         let mut s: string = "hello";
-//         let arr: [string; 2] = [a, "world"];
+//         let arr: [string; 2] = [s, "world"];
 //         s
 //     }`, "Illegal access of a moved variable", "VM - Array - Move ownership of element into array");
+
+
 

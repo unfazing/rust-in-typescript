@@ -1153,7 +1153,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             ) this.print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`, ctx)
 
             const next_elem_type: Type = this.visit(expr_ctx)
-            types.push(next_elem_type)
+            types.push(next_elem_type.clone())
             if (type === undefined) {
                 type = next_elem_type
                 continue
