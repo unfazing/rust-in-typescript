@@ -738,7 +738,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 this.print_or_throw_error(`Type error in assignment; cannot move a borrowed value.`, ctx);
             } 
 
-            if (ctx.expression(1) instanceof IndexExpressionContext) {
+            if (RHS instanceof IndexExpressionContext) {
                 this.print_or_throw_error(`Type error in assignment; cannot move out of a non-copy array`, ctx)
             }
             
@@ -1138,7 +1138,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             for (let i = 0; i < size; i++) {
                 copies.push(type.clone()); // creates a new copy of the object so that they can be dereferenced and moved
             }
-            return new ArrayType(copies, type)
+            return new ArrayType(copies, type.clone())
         }
 
         // NORMAL SYNTAX e.g. arr = [0, 0, 0, 0, 0]
@@ -1153,6 +1153,23 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             ) this.print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`, ctx)
 
             const next_elem_type: Type = this.visit(expr_ctx)
+
+            // Ownership and borrow rule checking similar to an assignment
+            if (this.canBeMoved(next_elem_type)) {
+                if (next_elem_type.ImmutableBorrowCount > 0 || next_elem_type.MutableBorrowExists) {
+                    this.print_or_throw_error(`Type error in assignment; cannot move a borrowed value into array.`, ctx);
+                } 
+
+                next_elem_type.mark_moved();
+
+                // Visualise the movement in ownership
+                this.add_to_type_env_visualisation(
+                    ctx, 
+                    VisualisationPoints.MOVES, 
+                    `'${expr_ctx.getText()}' is being moved to '${this.getSymbolFromExpression(expr_ctx)}' by assignment`
+                )
+            }
+
             types.push(next_elem_type.clone())
             if (type === undefined) {
                 type = next_elem_type

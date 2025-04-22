@@ -745,6 +745,21 @@ fn main() {
 }
 `, "Type error in let statement; cannot move a borrowed value", "Invalid - Move a borrowed non copy string out of an array")
 
+test_typechecker(`
+fn main() -> string {
+    let x: string = "hello";
+    let string_arr: [string; 1] = [x];
+    x
+}
+`, "Type error in pathExpression; use of a moved variable 'x'", "Invalid - Reads a moved variable after it is moving into an array")
+
+test_typechecker(`
+fn main() {
+    let x: string = "hello";
+    let x_ref: &string = &x;
+    let string_arr: [string; 1] = [x];
+}
+`, "Type error in assignment; cannot move a borrowed value into array.", "Invalid - Moving a borrowed value into an array")
 
 test_typechecker(`
 fn main() -> &mut string {
