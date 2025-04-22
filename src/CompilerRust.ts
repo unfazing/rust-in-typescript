@@ -252,7 +252,13 @@ let wc;
 let instrs;
 let ce: CompileTimeEnvironment;
 
+type LoopContext = {
+    insideLoop: boolean,
+};
+
 export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements RustParserVisitor<any> {
+
+    loopContextStack: LoopContext[]
 
     constructor() {
         super();
@@ -260,6 +266,7 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
         wc = 0
         instrs = []
         ce = new CompileTimeEnvironment()
+        this.loopContextStack = []
     }
 
     // entry node
@@ -811,22 +818,49 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
 
     // KW_WHILE expression /*except structExpression*/ blockExpression
     visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext): undefined {
+        this.loopContextStack.push({
+            insideLoop: true,
+        })
+
 		const loop_start: number = wc;
+
+        const loop_frame_instruction = {tag: "LOOP_FRAME", start_addr: wc, end_addr: -1};         
+        instrs[wc++] = loop_frame_instruction;
 
         const predicate: ExpressionContext = ctx.expression();
         this.visit(predicate);
 
-        const jump_on_false_instruction = { tag: "JOF", addr: -1 };
-		instrs[wc++] = jump_on_false_instruction;        
+        const exit_on_false_instruction = { tag: "EXIT_LOOP_ON_FALSE", addr: -1 };
+		instrs[wc++] = exit_on_false_instruction;        
         
         const body: BlockExpressionContext = ctx.blockExpression();
         this.visit(body)
 
         instrs[wc++] = { tag: "POP" };
-		instrs[wc++] = { tag: "GOTO", addr: loop_start };
-        jump_on_false_instruction.addr = wc;
+		instrs[wc++] = { tag: "RESET_LOOP", addr: loop_start };
+
+        exit_on_false_instruction.addr = wc;
+        loop_frame_instruction.end_addr = wc;
 
 		instrs[wc++] = { tag: "LDC", val: new UnitRustValue() }; // while loops always have the unit type () in Rust!!
+
+        this.loopContextStack.pop()
+    }
+
+    visitContinueExpression(ctx: ContinueExpressionContext) {
+        if (this.loopContextStack.length === 0 || this.loopContextStack.at(-1).insideLoop === false) {
+            throw new Error("Compile error; continue outside of a loop")
+        }
+
+		instrs[wc++] = { tag: "CONT" };
+    }
+
+    visitBreakExpression(ctx: BreakExpressionContext) {
+        if (this.loopContextStack.length === 0 || this.loopContextStack.at(-1).insideLoop === false) {
+            throw new Error("Compile error; break outside of a loop")
+        }
+
+		instrs[wc++] = { tag: "BREAK" };
     }
 
     // function_
@@ -836,6 +870,10 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
     // )
     // ;
     visitFunction_(ctx: Function_Context): undefined {
+        this.loopContextStack.push({
+            insideLoop: false,
+        })
+
         let symbol = this.visit(ctx.identifier())
         let params = ctx.functionParameters()
         let body = ctx.blockExpression()
@@ -847,6 +885,8 @@ export class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implemen
             tag: "ASSIGN_FN", 
             pos: ce.compile_time_environment_position(symbol),
         };
+
+        this.loopContextStack.pop()
     }
 
     insertClosure(params_ctx: FunctionParametersContext, body_ctx: BlockExpressionContext): undefined {

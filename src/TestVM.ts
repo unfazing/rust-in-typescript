@@ -633,6 +633,174 @@ test_VM(`
 
     }`, 1, "VM - Tail calls - clean up environments for tail call frames");
 
+test_VM(`
+    fn main() -> i32 {
+        let mut i: i32 = 0;
+
+        while (i < 10) {
+            i = i + 1;
+
+            if (i == 3) {
+                break;
+            }
+        }
+        
+        i
+
+    }`, 3, "VM - While loop - break");
+
+test_VM(`
+    fn main() -> i32 {
+        let i: i32 = 0;
+        while (true) {
+            break;
+        }
+        42
+    }
+`, 42, "VM - While loop with unconditional break");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut i: i32 = 0;
+        let mut sum: i32 = 0;
+
+        while (i < 5) {
+            i = i + 1;
+            if (i == 3) {
+                continue;
+            }
+            sum = sum + i;
+        }
+
+        sum // 1+2+4+5 = 12
+    }
+`, 12, "VM - While loop with continue to skip i == 3");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut i: i32 = 0;
+        let mut result: i32 = 0;
+
+        while (i < 10) {
+            i = i + 1;
+
+            if (i % 2 == 0) {
+                continue;
+            }
+
+            if (i == 7) {
+                break;
+            }
+
+            result = result + i;
+        }
+
+        result // 1 + 3 + 5 = 9
+    }
+`, 9, "VM - While loop with break and continue");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut outer: i32 = 0;
+        let mut inner: i32 = 0;
+
+        while (outer < 3) {
+            inner = 0;
+
+            while (inner < 5) {
+                if (inner == 2) {
+                    break;
+                }
+                inner = inner + 1;
+            }
+
+            outer = outer + 1;
+        }
+
+        outer // should reach 3
+    }
+`, 3, "VM - Nested while loop with inner break");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut outer: i32 = 0;
+        let mut sum: i32 = 0;
+
+        while (outer < 3) {
+            let mut inner: i32 = 0;
+
+            while (inner < 4) {
+                inner = inner + 1;
+
+                if (inner == 2) {
+                    continue;
+                }
+
+                sum = sum + 1;
+            }
+
+            outer = outer + 1;
+        }
+
+        sum // skips count when inner == 2, so (3 * (4-1)) = 9 - 3 = 6
+    }
+`, 9, "VM - Nested while loop with inner continue");
+
+test_VM(`
+    fn main() -> i32 {
+        let mut i: i32 = 0;
+        let mut sum: i32 = 0;
+
+        while (i < 5) {
+            let mut j: i32 = 0;
+
+            while (j < 3) {
+                if (j == 1) {
+                    break;
+                }
+                sum = sum + 1;
+                j = j + 1;
+            }
+
+            i = i + 1;
+
+            if (i == 3) {
+                continue;
+            }
+
+            sum = sum + 10;
+        }
+
+        sum
+    }
+`, 45, "VM - Nested while with inner break and outer continue");
+    
+test_VM(`
+    fn main() {
+        fn f() {
+            break; // compile error
+        }
+
+        while true {
+            f();
+            break;
+        }
+    }
+`, "break outside of a loop", "Compiler - break outside a loop");
+
+test_VM(`
+    fn main() {
+        fn f() {
+            continue; // compile error
+        }
+
+        while (true) {
+            f();
+            break;
+        }
+    }
+`, "continue outside of a loop", "Compiler - continue outside a loop");
+
 // // Invalid array case — left as is
 // test_VM(`
 //     fn main() -> string {

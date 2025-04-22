@@ -1090,6 +1090,14 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
         return body_type instanceof ReturnType ? body_type : new UnitType() 
     }
 
+    visitBreakExpression(ctx: BreakExpressionContext) {
+        return new UnitType()
+    }
+
+    visitContinueExpression(ctx: ContinueExpressionContext) {
+        return new UnitType()
+    }
+
     // LPAREN innerAttribute* expression RPAREN
     visitGroupedExpression(ctx: GroupedExpressionContext): Type {
         return this.visit(ctx.expression());
@@ -1302,7 +1310,6 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
     // )
     // ;
     visitFunction_(ctx: Function_Context): Type {
-
         // Helper function that returns the first occurrence of a borrow type in a list of function parameter types
         // Throws error if more than one borrow type in list of function parameter types (should never trigger as this error is caught by FunctionType constructor)
         function findBorrowParam(expected_param_types: Type[]): Type {

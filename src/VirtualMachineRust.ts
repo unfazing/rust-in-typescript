@@ -57,6 +57,7 @@ const String_tag = 13;
 const Reference_tag = 14;
 const Unassigned_tag = 15;
 const Array_tag = 16;
+const Loopframe_tag = 17;
 
 const tagMap = {
 	[False_tag]: "False",
@@ -75,7 +76,8 @@ const tagMap = {
 	[String_tag]: "String",
 	[Reference_tag]: "Reference",
 	[Unassigned_tag]: "Unassigned",
-	[Array_tag]: "Array"
+	[Array_tag]: "Array",
+	[Loopframe_tag]: "Loopframe"
 };
 
 /* *************************
@@ -544,6 +546,47 @@ class Stack {
 
 	get_Closure_Env(address: number): number {
 		return this.get_child(address, 0);
+	}
+
+
+	// loop frame
+	// [1 byte tag, 2 bytes start pc, 2 bytes end pc, 1 byte unused, 2 byte size, 1 byte unused]
+	// first child stores FP to return to
+	allocate_Loopframe(start_pc: number, end_pc: number) {
+		const address = this.allocate(Loopframe_tag, 2);
+		this.set_2_bytes_at_offset(address, 1, start_pc);
+		this.set_2_bytes_at_offset(address, 3, end_pc);
+		this.set(address + 1, this.FP) // saved FP to restore later
+
+		this.FP = address;
+		return address;
+	}
+
+	get_Loopframe_start_PC() {
+		return this.get_2_bytes_at_offset(this.FP, 1)
+	}
+
+	get_Loopframe_end_PC() {
+		return this.get_2_bytes_at_offset(this.FP, 3)
+	}
+
+	get_Loopframe_FP(): number {
+		return this.get_child(this.FP, 0)
+	}
+
+	is_Loopframe() {
+		return this.get_tag(this.FP) === Loopframe_tag
+	}
+
+	pop_Loopframe() {
+		if (this.get_tag(this.FP) !== Loopframe_tag) {
+			throw new Error("Runtime Error; [STACK::pop_Loopframe] FP is not pointed to a loop frame.")
+		}
+
+		this.free_heap_allocated_memory_in_range(this.FP, this.SP);
+
+		this.SP = this.FP;
+		this.FP = this.get_Loopframe_FP();
 	}
 
 	// call frame
@@ -1391,8 +1434,8 @@ const microcode = {
 	UNOP: (instr) => push(OS, apply_unop(instr.sym, OS.pop())),
 	BINOP: (instr) => push(OS, apply_binop(instr.sym, OS.pop(), OS.pop())),
 	POP: (instr) => OS.pop(),
-	JOF: (instr) => (PC = STACK.is_True(OS.pop()) ? PC : instr.addr),
 	GOTO: (instr) => (PC = instr.addr),
+	JOF: (instr) => (PC = STACK.is_True(OS.pop()) ? PC : instr.addr),
 	ENTER_SCOPE: (instr) => {
 		STACK.allocate_Blockframe(E);
 		const frame_address = HEAP.allocateFrame(instr.num);
@@ -1419,6 +1462,52 @@ const microcode = {
 		// THAT HAVE NOT BEEN MOVED
 		STACK.pop_Blockframe();
 	
+	},
+	EXIT_LOOP_ON_FALSE: (instr) => {
+		if (STACK.is_False(OS.pop())) {
+			PC = instr.addr;
+			STACK.pop_Loopframe();
+		}
+	},
+	LOOP_FRAME: (instr) => {
+		STACK.allocate_Loopframe(instr.start_addr, instr.end_addr);
+	},
+	RESET_LOOP: (instr) => {
+		if (!STACK.is_Loopframe()) { // sanity check
+			throw new Error("Runtime Error; [instr: RESET_LOOP] Current stack frame is not a loop frame when RESET_LOOP instruction is executed.")
+		}
+
+		PC = instr.addr;
+		STACK.pop_Loopframe();
+	},
+	BREAK: (instr) => {
+		// Pop the block frames until we see the first loop frame
+		while (STACK.is_Blockframe()) {
+			HEAP.freeEnvironmentAndLatestFrame();
+
+			E = STACK.get_Blockframe_environment();
+
+			// Also free heap nodes whose owners were allocated in this scope
+			STACK.pop_Blockframe();
+		}
+
+		PC = STACK.get_Loopframe_end_PC();
+		STACK.pop_Loopframe();
+	},
+	CONT: (instr) => {
+		// Pop the block frames until we see the first loop frame
+		while (STACK.is_Blockframe()) {
+			HEAP.freeEnvironmentAndLatestFrame();
+
+			E = STACK.get_Blockframe_environment();
+
+			// Restore FP. No need to restore E. 
+			// Also free heap nodes whose owners were allocated in this scope
+			STACK.pop_Blockframe();
+		}
+
+		PC = STACK.get_Loopframe_start_PC();
+		STACK.pop_Loopframe();
 	},
 	LD: (instr) => {
 		const addr = HEAP.getEnvValue(E, instr.pos); // this address is either a stack or heap addr

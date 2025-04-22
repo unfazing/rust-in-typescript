@@ -131,6 +131,12 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
             console.log(`❌ Test Failed - Result mismatch - Expected ${expectedResult} but got ${actualResult}`);
         }
     } catch (error) {
+
+        if (error.message.includes(expectedResult)) {
+            console.log(`✅ Test Pass. Error thrown matches expected: \n${error.message}`);
+            return true
+        }
+
         console.log(`❌ Test Failed - ${error.message}`);
         console.log(error.stack); // Include stack trace for debugging
         return false;
