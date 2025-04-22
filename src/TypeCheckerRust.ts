@@ -1166,7 +1166,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 this.add_to_type_env_visualisation(
                     ctx, 
                     VisualisationPoints.MOVES, 
-                    `'${expr_ctx.getText()}' is being moved to '${this.getSymbolFromExpression(expr_ctx)}' by assignment`
+                    `'${expr_ctx.getText()}' is being moved into an array by assignment`
                 )
             }
 

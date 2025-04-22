@@ -340,6 +340,7 @@ export abstract class RefType extends Type {
             this.InnerType.MutableBorrowExists = false
         }
     }
+
 }
 
 export class ImmutableRefType extends RefType {
@@ -350,7 +351,7 @@ export class ImmutableRefType extends RefType {
     }
 
     clone() {
-        return new ImmutableRefType(this.InnerType.clone())
+        return new ImmutableRefType(this.InnerType)
     }
 }
 
@@ -366,7 +367,7 @@ export class MutableRefType extends RefType {
         this.InnerType.MutableBorrowExists = false
     }
     clone() {
-        return new MutableRefType(this.InnerType.clone())
+        return new MutableRefType(this.InnerType)
     }
 }
 
