@@ -11,7 +11,9 @@
     "generate-parser-rust": "antlr4ng -Dlanguage=TypeScript -visitor src/parser/src/RustParser.g4",
     "start": "node dist/index.js",
     "test-vm": "rollup -c --input src/TestVM.ts; node dist/TestVM.js",
-    "test-typechecker": "rollup -c --input src/TestTypeChecker.ts; node dist/TestTypeChecker.js"
+    "test-typechecker": "rollup -c --input src/TestTypeChecker.ts; node dist/TestTypeChecker.js",
+    "build-playground": "rollup -c --input playground/Playground.ts",
+    "run-playground": "node dist/Playground.js"
   },
   "repository": {
     "type": "git",
