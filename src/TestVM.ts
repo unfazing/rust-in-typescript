@@ -814,6 +814,13 @@ test_VM(`
     }
 `, "continue outside of a loop", "Compiler - continue outside a loop");
 
+test_VM(`
+    fn main() -> [i32; 3] {
+        let arr: [i32; 3] = [1, 2, 3];
+        arr
+    }
+`, [1, 2, 3], "VM - function returns an array");
+
 // Invalid array case — left as is
 // test_VM(`
 //     fn main() -> string {

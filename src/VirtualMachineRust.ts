@@ -1233,11 +1233,18 @@ const address_to_Rust_value = (address: number): RustValue => {
 	}
 
 	if (STACK.compare_tag(address, Array_tag)) {
-		value = new RustValue("<array>"); // we should not use the array value
+		let array = [];
+		
+		let element_addresses = STACK.get_Array_elements(address)
+		for (const element of element_addresses) {
+			array.push(address_to_Rust_value(element).val)
+		}
+
+		value = new RustValue(array); 
 	}
 
 	if (STACK.compare_tag(address, Closure_tag)) {
-		value = new RustValue("<closure>"); // we should not use the closure value at all
+		value = new RustValue("<closure>"); // TODO: add string representation 
 	}
 
 	// Uncomment and implement if needed:

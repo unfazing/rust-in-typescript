@@ -123,8 +123,25 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
         const actualResult = VM.execute(instructions);
         
         console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
+
+        const compare = (actual: any, expected: any) => {
+            if (actual === undefined || expected === undefined) {
+                return actual === expected
+            }
+
+            if (typeof actual !== 'object' || typeof expected !== 'object') {
+                return actual === expected
+            }
+
+            if (Array.isArray(actual) && Array.isArray(expected)) {
+                return actual.length === expected.length
+                    && actual.every((el, i) => compare(el, expected[i]))
+            }
+
+            return false;
+        }
         
-        if (actualResult === expectedResult) {
+        if (compare(actualResult, expectedResult)) {
             console.log("✅ Test Passed");
             return true;
         } else {
@@ -143,42 +160,3 @@ export const test_VM = (code: string, expectedResult: any, testName?: string, pr
     }
 };
 
-// export const test_VM = (code: string, expectedResult: any, testName?: string, print_instrs?: boolean) => {
-//     try {
-//         const inputStream = CharStream.fromString(code);
-//         const lexer = new RustLexer(inputStream);
-//         const tokenStream = new CommonTokenStream(lexer);
-//         const parser = new RustParser(tokenStream);
-
-//         // Parse the input
-//         const tree = parser.crate();
-
-//         // Typecheck
-//         const typechecker = new RustTypeChecker();
-//         typechecker.check(tree, false);
-
-//         // Compile
-//         const compiler = new RustCompiler();
-//         const instructions = compiler.compile(tree);
-
-//         if (print_instrs) printInstructions(instructions);
-
-//         const VM = new RustVirtualMachine();
-//         const actualResult = VM.execute(instructions);
-
-//         if (actualResult === expectedResult) {
-//             return true; // Silent on success
-//         } else {
-//             console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
-//             console.log(`Code:\n${code}`);
-//             console.log(`Expected: ${expectedResult}, Actual: ${actualResult}`);
-//             return false;
-//         }
-//     } catch (error) {
-//         console.log(`\n❌ Test Failed: ${testName || 'Unnamed Test'}`);
-//         console.log(`Code:\n${code}`);
-//         console.log(`Error message: ${error.message}`)
-//         console.log(error.stack);
-//         return false;
-//     }
-// };
