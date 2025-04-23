@@ -1149,7 +1149,8 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 expr_ctx instanceof PathExpression_Context || 
                 expr_ctx instanceof BorrowExpressionContext ||  
                 expr_ctx instanceof ArrayExpressionContext || 
-                expr_ctx instanceof DereferenceExpressionContext)
+                expr_ctx instanceof DereferenceExpressionContext ||
+                expr_ctx instanceof IndexExpressionContext)
             ) this.print_or_throw_error(`Type error in array elements; Element must be a literal, variable name, or an array. Found ${expr_ctx.getText()}`, ctx)
 
             const next_elem_type: Type = this.visit(expr_ctx)
@@ -1159,6 +1160,10 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
                 if (next_elem_type.ImmutableBorrowCount > 0 || next_elem_type.MutableBorrowExists) {
                     this.print_or_throw_error(`Type error in assignment; cannot move a borrowed value into array.`, ctx);
                 } 
+
+                if (expr_ctx instanceof IndexExpressionContext) {
+                    this.print_or_throw_error(`Type error in assignment; cannot move out of a non-copy array`, ctx)
+                }
 
                 next_elem_type.mark_moved();
 
@@ -1177,7 +1182,7 @@ export class TypeCheckerVisitor extends AbstractParseTreeVisitor<any> implements
             } 
 
             // Check that every array element's type is the same
-            if (!compare_type(type, next_elem_type)) {
+            if (!compare_type(type.clone(), next_elem_type.clone())) {
                 this.print_or_throw_error(`Type error in array elements; elements of an array must all have same type. Found ${unparse_type(type)} and ${unparse_type(next_elem_type)}`, ctx)
             }
         }
