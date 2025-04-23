@@ -47,7 +47,7 @@ async function start() {
       prompt: "> ",
     });
   
-    console.log(`Press enter to run code at playground/input.txt`);
+    console.log(`Press enter to run code at playground/input.rs`);
     console.log("Type 'exit' to quit.");
     rl.prompt();
   
@@ -60,7 +60,7 @@ async function start() {
       }
   
       try {
-        const code = fs.readFileSync("playground/input.txt", "utf8");
+        const code = fs.readFileSync("playground/input.rs", "utf8");
         execute(code);
       } catch (err: any) {
         console.error("Could not read 'input.txt':", err.message);
